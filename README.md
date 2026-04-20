@@ -2,6 +2,8 @@
 
 Scope of work for the Olander Agents project.
 
+## Status: ready to go, awaiting data
+
 ## Phase 1
 
 Build out the frontend with a placeholder backend. We don't have the real data yet, but we're assuming it's mostly documents and spreadsheets. We'll get more specific once we actually see it.
