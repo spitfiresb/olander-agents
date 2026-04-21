@@ -10,10 +10,9 @@ Build out the frontend with a placeholder backend. We don't have the real data y
 
 What we need to build:
 
-- A document management system so we can keep track of what's been uploaded and where it lives.
-- An admin dashboard that shows what each agent has access to, with the ability to add or remove sources.
-- Authentication, so only the right people can log in and admins can manage users.
-- A chat UI for talking to the agents. Non-functional for now, just the interface.
+- A document management system so we can keep track of what's been uploaded and where it lives. This basically means the DB and a UI to access it. this will be a super important decison and a hard one to make given that there will be varied document types and security is important. be prepared to justify this decision
+- An admin dashboard. right now I think this should focus on who has access to the platform. maybe just some way to allow specific users, but this will need to work with OAuth. Also part of this dashboard will need to coexist with the document management system so prepare for that integration as these are both admin level features 
+- A chat UI for talking to the agents. prepare it to work with the data get everything set up so that once the data is there we are ready to go. this page should be accesible to both normal (approved) users and admin
 
 Before we start writing code, each of us should come in with a proposed tech stack. I'll bring one too. We'll talk through the tradeoffs and pick one together.
 
