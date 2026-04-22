@@ -27,5 +27,33 @@ At a minimum, whatever we go with needs to cover:
 
 ## Phase 2
 
-Hook up real data. We'll start with a small representative sample from one source so we can see how the agents behave against actual content before scaling it up.
+Hook up real data.
 
+### Data access plan (from Olander correspondence)
+
+Olander runs Epicor Prophet 21 (P21) as their ERP. They own the P21 API, hosted on a middleware server managed by the hosting provider. We'll get READ ONLY access to the SQL database files through that API, gated by IP whitelisting at multiple security layers.
+
+plan:
+1. the provider contact creates a user account in Olander's P21 environment for our team so we can poke around and see where fields live.
+2. We send the provider contact the IP addresses we'll connect from. He forwards to the hosting provider for whitelisting.
+3. the provider contact sends API docs and we schedule a P21 walkthrough meeting.
+4. Initial access is to **dev/play data only**. Production data comes after the AI app is built out and trust is established.
+5. Access levels need to be set up so different user tiers see different data.
+6. Everything stays within Olander's tenant — not shareable outside the company.
+
+Open item on our side:
+- Our devs are on dynamic IPs (CGNAT), so we need a static IP solution before the provider contact can whitelist. Leaning toward a DigitalOcean static-IP VM or AWS EC2 for dev, and a static egress proxy for production. Alex to confirm the approach and send an IP by end of weekend, then follow up to get a meeting on the calendar.
+
+## Phase 3
+
+Security review
+
+This is extremely important. we will have a whitelisted IP with full ERP API access. this needs to be locked down.
+
+We will need to set up a full query audit log where every P21 call recorded with the app user who triggered it, the query, and the row count. make sure its stored outside the app DB.
+
+Prompt injection. We will likley use multiagent architecture to check for prompt injection.
+
+## Questions for Olander
+
+what tiers of access are needed. this will likley be determined by what P21 data the AI agent can access so we will want to get specific about that.
