@@ -14,16 +14,16 @@ What we need to build:
 - An admin dashboard. right now I think this should focus on who has access to the platform. maybe just some way to allow specific users, but this will need to work with OAuth. Also part of this dashboard will need to coexist with the document management system so prepare for that integration as these are both admin level features 
 - A chat UI for talking to the agents. prepare it to work with the data get everything set up so that once the data is there we are ready to go. this page should be accesible to both normal (approved) users and admin
 
-Before we start writing code, each of us should come in with a proposed tech stack. I'll bring one too. We'll talk through the tradeoffs and pick one together.
+### Tech stack
 
-At a minimum, whatever we go with needs to cover:
+Picked to keep recurring costs near zero — Olander is already on the hook for LLM API pricing, so everything else lives on free tiers or minimal infra.
 
-- Hosted frontend
-- Hosted backend
-- An LLM provider and a way to call it
-- Authentication
-- A database
-- Enough app scaffolding to support everything above
+- **Frontend + backend:** Next.js on Vercel. One app, API routes / server actions handle the backend.
+- **Database:** Neon Postgres for users, access tiers, document metadata, and chat history. A second Neon project holds the Phase 3 audit log, isolated from the app DB.
+- **Document storage:** Vercel Blob for uploaded files. The app DB only stores metadata.
+- **Auth:** Auth.js (NextAuth) with the Microsoft Entra provider by default. Single tenant, so no need for a multi-tenant SSO vendor. If Olander later wants to bring their own IdP (Okta, etc.), it's a config swap to Auth.js's generic OIDC/SAML provider — we eat the dev work, they avoid per-user fees.
+- **LLM:** Anthropic API. A multi-agent layer in the backend handles prompt injection checks
+- **Static egress to P21:** single DigitalOcean droplet with a Reserved IP, running a small Node "P21 gateway" service. Vercel calls the gateway over HTTPS; the gateway writes the Phase 3 audit row to the separate Neon project, then forwards to P21. Same gateway and same whitelisted IP serve dev and prod — the hosting provider only has to whitelist one address. Reserved IP is free while attached and survives droplet rebuild, so we can replace the host without re-asking for a whitelist update. Picked over AWS EC2+EIP (no surprise per-GB egress bills, simpler ops handoff), Hetzner (US-based provider is a cleaner trust posture for an ERP data path), and Vercel Secure Compute / shared-IP PaaS options (enterprise pricing or shared IPs that leak other tenants into the whitelist).
 
 ## Phase 2
 
@@ -42,7 +42,7 @@ plan:
 6. Everything stays within Olander's tenant — not shareable outside the company.
 
 Open item on our side:
-- Our devs are on dynamic IPs (CGNAT), so we need a static IP solution before the provider contact can whitelist. Leaning toward a DigitalOcean static-IP VM or AWS EC2 for dev, and a static egress proxy for production. Alex to confirm the approach and send an IP by end of weekend, then follow up to get a meeting on the calendar.
+- Devs are on dynamic IPs (CGNAT), so we need a static IP before the provider contact can whitelist. **Decided:** single DigitalOcean droplet with a Reserved IP, running a P21 gateway service (see tech stack). Same IP for dev and prod — the hosting provider only whitelists one address. Alex to provision the droplet, reserve the IP, and send it to the provider contact, then follow up to get the P21 walkthrough on the calendar.
 
 ## Phase 3
 
@@ -56,4 +56,6 @@ Prompt injection. We will likley use multiagent architecture to check for prompt
 
 ## Questions for Olander
 
-what tiers of access are needed. this will likley be determined by what P21 data the AI agent can access so we will want to get specific about that.
+What tiers of access are needed. this will likley be determined by what P21 data the AI agent can access so we will want to get specific about that.
+
+What sort of login do you prefer, we have planned for Microsoft Oauth but we can set up SSO with your provider if you use Okta or similar
