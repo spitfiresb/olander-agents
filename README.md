@@ -4,6 +4,26 @@ Scope of work for the Olander Agents project.
 
 ## Status: ready to go, awaiting data
 
+## Getting started
+
+```bash
+npm install
+cp .env.example .env.local   # fill in values once provisioned
+npm run dev
+```
+
+App runs at http://localhost:3000.
+
+Other scripts:
+
+- `npm run build` — production build
+- `npm run lint` — ESLint
+- `npm start` — serve production build
+
+The scaffold is a vanilla Next.js 16 app (App Router, TypeScript, Tailwind, ESLint, `src/`, `@/*` import alias). Auth, DB, and LLM wiring will land in follow-up PRs.
+
+Other docs live in [`docs/`](./docs): [Assignments](./docs/Assignments.md), [System diagram](./docs/System.md), [API requirements](./docs/API_Requirements.md).
+
 ## Phase 1
 
 Build out the frontend with a placeholder backend. We don't have the real data yet, but we're assuming it's mostly documents and spreadsheets. We'll get more specific once we actually see it.
