@@ -10,6 +10,17 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* Brand tokens — locked in docs/plans/Chat_LLM.md.
+     Red is reserved for action affordances; do not introduce a new hue. */
+  --color-brand-red: #eb402e;
+  --color-brand-sand: #e4d9c5;
+  --color-brand-charcoal: #2d2e29;
+  --color-brand-surface: #ffffff;
+  --color-brand-canvas: #faf7f1;
+  --color-brand-ink-soft: #4a4b46;
+
+  --font-brand: var(--font-geist-sans);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -20,7 +31,24 @@
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-brand-surface);
+  color: var(--color-brand-charcoal);
+  font-family: var(--font-brand);
+}
+
+@keyframes message-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .animate-message-in {
+    animation: message-fade-up 200ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
 }
