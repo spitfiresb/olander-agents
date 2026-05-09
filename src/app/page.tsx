@@ -27,8 +27,9 @@ export default function Home() {
           <p className="mt-1.5 text-sm text-brand-ink-soft">
             Continue with your Olander Microsoft account.
           </p>
+          {/* Auth not wired yet; CTA bypasses straight to the chat. */}
           <a
-            href="/sign-in"
+            href="/chat"
             className="mt-6 flex h-11 items-center justify-center rounded-md bg-brand-red px-6 text-sm font-medium text-white transition-colors hover:bg-brand-red/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2"
           >
             Sign in with Microsoft

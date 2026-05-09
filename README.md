@@ -22,7 +22,7 @@ Other scripts:
 
 The scaffold is a vanilla Next.js 16 app (App Router, TypeScript, Tailwind, ESLint, `src/`, `@/*` import alias). Auth, DB, and LLM wiring will land in follow-up PRs.
 
-Other docs live in [`docs/`](./docs): [Assignments](./docs/Assignments.md), [System diagram](./docs/System.md), [API requirements](./docs/API_Requirements.md).
+Other docs live in [`docs/`](./docs): [Assignments](./docs/Assignments.md), [System diagram](./docs/System.md), [P21 connection](./docs/P21_Connection.md).
 
 ## Phase 1
 
