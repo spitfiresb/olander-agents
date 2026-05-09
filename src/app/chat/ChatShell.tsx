@@ -3,19 +3,14 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Wordmark } from "@/components/Wordmark";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
 import { Sidebar } from "./Sidebar";
 import { signOutAction } from "./actions";
 
-type SessionUser = {
-  name: string | null;
-  email: string | null;
-};
-
-export function ChatShell({ user }: { user: SessionUser }) {
+export function ChatShell() {
   const [transport] = useState(
     () => new DefaultChatTransport({ api: "/api/chat" }),
   );
@@ -51,29 +46,15 @@ export function ChatShell({ user }: { user: SessionUser }) {
           >
             <Wordmark variant="topbar" />
           </Link>
-          <span
-            className="ml-auto max-w-[140px] truncate text-xs text-white/70"
-            title={user.email ?? undefined}
-          >
-            {user.email}
-          </span>
           <button
             type="button"
             onClick={clearChat}
             aria-label="Start a new chat"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-white/15 bg-white/5 text-white transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal"
+            className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-white/15 bg-white/5 text-white transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal"
           >
             <PlusIcon />
           </button>
-          <form action={signOutAction}>
-            <button
-              type="submit"
-              aria-label="Sign out"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-white/15 bg-white/5 text-white transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal"
-            >
-              <SignOutIcon />
-            </button>
-          </form>
+          <AccountMenu variant="charcoal" />
         </header>
 
         {/* Desktop top strip with status pill (hidden under lg) */}
@@ -81,7 +62,9 @@ export function ChatShell({ user }: { user: SessionUser }) {
           <span className="rounded-full border border-brand-charcoal/10 bg-white px-3 py-1 text-xs text-brand-ink-soft">
             Demo mode — sample data only
           </span>
-          <UserPill user={user} className="absolute right-4" />
+          <div className="absolute inset-y-0 right-4 flex items-center">
+            <AccountMenu variant="canvas" />
+          </div>
         </header>
 
         <main className="flex min-h-0 flex-1 flex-col">
@@ -106,31 +89,62 @@ export function ChatShell({ user }: { user: SessionUser }) {
   );
 }
 
-function UserPill({
-  user,
-  className = "",
-}: {
-  user: SessionUser;
-  className?: string;
-}) {
+function AccountMenu({ variant }: { variant: "canvas" | "charcoal" }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!containerRef.current?.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const triggerClass =
+    variant === "charcoal"
+      ? "border-white/15 bg-white/5 text-white hover:bg-white/10 focus-visible:ring-white/40 focus-visible:ring-offset-brand-charcoal"
+      : "border-brand-charcoal/15 bg-white text-brand-ink-soft hover:border-brand-charcoal/30 hover:bg-brand-sand/40 focus-visible:ring-brand-red";
+
   return (
-    <div
-      className={`flex items-center gap-2 rounded-full border border-brand-charcoal/10 bg-white px-1 py-1 pl-3 text-xs text-brand-ink-soft ${className}`}
-    >
-      <span
-        className="max-w-[200px] truncate"
-        title={user.email ?? undefined}
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        aria-label="Account menu"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${triggerClass}`}
       >
-        {user.email ?? user.name ?? "Signed in"}
-      </span>
-      <form action={signOutAction}>
-        <button
-          type="submit"
-          className="rounded-full bg-brand-charcoal px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-brand-charcoal/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2"
+        <SettingsIcon />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="animate-menu-in absolute right-0 top-full z-20 mt-2 min-w-[160px] overflow-hidden rounded-2xl border border-brand-charcoal/10 bg-white py-1 shadow-md"
         >
-          Sign out
-        </button>
-      </form>
+          <form action={signOutAction}>
+            <button
+              type="submit"
+              role="menuitem"
+              className="block w-full px-3 py-2 text-left text-sm text-brand-charcoal transition-colors hover:bg-brand-sand/40 focus-visible:bg-brand-sand/40 focus-visible:outline-none"
+            >
+              Sign out
+            </button>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
@@ -152,12 +166,12 @@ function PlusIcon() {
   );
 }
 
-function SignOutIcon() {
+function SettingsIcon() {
   return (
     <svg
-      viewBox="0 0 16 16"
-      width="14"
-      height="14"
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
       fill="none"
       stroke="currentColor"
       strokeWidth="1.75"
@@ -165,9 +179,8 @@ function SignOutIcon() {
       strokeLinejoin="round"
       aria-hidden
     >
-      <path d="M6.5 2.5h-3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h3" />
-      <path d="M10 5l3 3-3 3" />
-      <path d="M13 8H6" />
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+      <circle cx="12" cy="12" r="3" />
     </svg>
   );
 }
