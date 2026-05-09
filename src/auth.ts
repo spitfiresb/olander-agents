@@ -4,18 +4,12 @@ import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { db } from "@/db";
 import { users, accounts, sessions, verificationTokens } from "@/db/schema";
 
-const ALLOWED_DOMAINS = ["olander.com"];
-const ALLOWED_EMAILS = [
-  "olanderagents@gmail.com",
-  "zsaeed@uoregon.edu",
-  "arankine@uoregon.edu",
-  "jsoc@uoregon.edu",
-];
+// uoregon.edu is for the dev/test phase. Drop it before handing off to Olander.
+const ALLOWED_DOMAINS = ["olander.com", "uoregon.edu"];
 
 function isAllowed(email: string | null | undefined): boolean {
   if (!email) return false;
   const normalized = email.toLowerCase();
-  if (ALLOWED_EMAILS.includes(normalized)) return true;
   return ALLOWED_DOMAINS.some((d) => normalized.endsWith("@" + d));
 }
 
