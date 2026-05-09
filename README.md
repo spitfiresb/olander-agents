@@ -19,8 +19,18 @@ Other scripts:
 - `npm run build` — production build
 - `npm run lint` — ESLint
 - `npm start` — serve production build
+- `npm run db:generate` — generate a Drizzle migration from `src/db/schema.ts`
+- `npm run db:migrate` — apply migrations to the DB at `DATABASE_URL`
+- `npm run db:studio` — open Drizzle Studio against the DB
 
-The scaffold is a vanilla Next.js 16 app (App Router, TypeScript, Tailwind, ESLint, `src/`, `@/*` import alias). Auth, DB, and LLM wiring will land in follow-up PRs.
+Stack: Next.js 16 (App Router, TypeScript, Tailwind, ESLint, `src/`, `@/*`), Auth.js v5 with the Microsoft Entra provider, Drizzle ORM over Neon Postgres.
+
+### First-time DB setup
+
+1. Create a Neon project, copy the pooled connection string into `.env.local` as `DATABASE_URL`.
+2. Register an app in Microsoft Entra (Azure portal). Add redirect URI `http://localhost:3000/api/auth/callback/microsoft-entra-id` for dev. Drop the client ID, secret, and tenant ID into `.env.local`.
+3. Generate `AUTH_SECRET` with `openssl rand -base64 32`.
+4. Run `npm run db:generate` to produce the initial migration, then `npm run db:migrate` to apply it.
 
 Other docs live in [`docs/`](./docs): [Assignments](./docs/Assignments.md), [System diagram](./docs/System.md), [P21 connection](./docs/P21_Connection.md).
 
