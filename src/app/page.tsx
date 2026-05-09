@@ -1,4 +1,5 @@
 import { Wordmark } from "@/components/Wordmark";
+import { signIn } from "@/auth";
 
 export default function Home() {
   return (
@@ -27,12 +28,19 @@ export default function Home() {
           <p className="mt-1.5 text-sm text-brand-ink-soft">
             Continue with your Olander Microsoft account.
           </p>
-          <a
-            href="/sign-in"
-            className="mt-6 flex h-11 items-center justify-center rounded-md bg-brand-red px-6 text-sm font-medium text-white transition-colors hover:bg-brand-red/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2"
+          <form
+            action={async () => {
+              "use server";
+              await signIn("microsoft-entra-id", { redirectTo: "/chat" });
+            }}
           >
-            Sign in with Microsoft
-          </a>
+            <button
+              type="submit"
+              className="mt-6 flex h-11 w-full items-center justify-center rounded-md bg-brand-red px-6 text-sm font-medium text-white transition-colors hover:bg-brand-red/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2"
+            >
+              Sign in with Microsoft
+            </button>
+          </form>
           <div className="mt-5 flex items-center gap-2 text-xs text-brand-ink-soft">
             <LockIcon />
             Internal use — authorized employees only.
