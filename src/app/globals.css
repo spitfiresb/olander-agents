@@ -31,7 +31,6 @@
 }
 
 body {
-  background: var(--color-brand-surface);
   color: var(--color-brand-charcoal);
   font-family: var(--font-brand);
 }

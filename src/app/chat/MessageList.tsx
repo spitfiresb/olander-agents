@@ -16,16 +16,13 @@ type Props = {
 export function MessageList({ messages, status, onRegenerate, onSelectSuggestion }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [stuckToBottom, setStuckToBottom] = useState(true);
-  const [hasNewSinceScrollAway, setHasNewSinceScrollAway] = useState(false);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const onScroll = () => {
       const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      const atBottom = distFromBottom < STUCK_THRESHOLD_PX;
-      setStuckToBottom(atBottom);
-      if (atBottom) setHasNewSinceScrollAway(false);
+      setStuckToBottom(distFromBottom < STUCK_THRESHOLD_PX);
     };
     el.addEventListener("scroll", onScroll);
     return () => el.removeEventListener("scroll", onScroll);
@@ -33,23 +30,18 @@ export function MessageList({ messages, status, onRegenerate, onSelectSuggestion
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
-    if (stuckToBottom) {
-      el.scrollTop = el.scrollHeight;
-    } else {
-      setHasNewSinceScrollAway(true);
-    }
+    if (!el || !stuckToBottom) return;
+    el.scrollTop = el.scrollHeight;
   }, [messages, status, stuckToBottom]);
 
   const jumpToLatest = () => {
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-    setHasNewSinceScrollAway(false);
   };
 
   const isEmpty = messages.length === 0;
-  const showJumpPill = !stuckToBottom && hasNewSinceScrollAway;
+  const showJumpPill = !isEmpty && !stuckToBottom;
 
   const lastAssistantIndex = (() => {
     for (let i = messages.length - 1; i >= 0; i--) {
