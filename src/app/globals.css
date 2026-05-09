@@ -1,17 +1,10 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 
-  /* Brand tokens — locked in docs/plans/Chat_LLM.md.
+  /* Brand tokens — see DESIGN.md.
      Red is reserved for action affordances; do not introduce a new hue. */
   --color-brand-red: #eb402e;
   --color-brand-sand: #e4d9c5;
@@ -21,13 +14,6 @@
   --color-brand-ink-soft: #4a4b46;
 
   --font-brand: var(--font-geist-sans);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {

@@ -4,6 +4,7 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { PlusIcon } from "@/components/icons";
 import { Wordmark } from "@/components/Wordmark";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
@@ -146,23 +147,6 @@ function AccountMenu({ variant }: { variant: "canvas" | "charcoal" }) {
         </div>
       )}
     </div>
-  );
-}
-
-function PlusIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      width="14"
-      height="14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      aria-hidden
-    >
-      <path d="M8 3v10M3 8h10" />
-    </svg>
   );
 }
 

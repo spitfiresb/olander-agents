@@ -1,6 +1,8 @@
 # Olander Agents — Chat UI + LLM Integration Plan
 
-> Source of truth for James's two assignments: branded chat UI + LLM integration via Vercel AI SDK + Anthropic. Read this end-to-end before resuming work. Update as decisions land.
+> **STATUS: archived snapshot.** Stages 0–2 have shipped. Source of truth for design decisions is now `DESIGN.md` and the code itself; this file is kept for historical context on Stage 3 scope (Zod tool stubs + tests). Don't update — supersede with a new plan when Stage 3 starts.
+
+> Original framing: source of truth for James's two assignments — branded chat UI + LLM integration via Vercel AI SDK + Anthropic.
 
 ## Status
 

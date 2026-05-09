@@ -32,7 +32,7 @@ Stack: Next.js 16 (App Router, TypeScript, Tailwind, ESLint, `src/`, `@/*`), Aut
 3. Generate `AUTH_SECRET` with `openssl rand -base64 32`.
 4. Run `npm run db:generate` to produce the initial migration, then `npm run db:migrate` to apply it.
 
-Other docs live in [`docs/`](./docs): [Assignments](./docs/Assignments.md), [System diagram](./docs/System.md), [API requirements](./docs/API_Requirements.md).
+Other docs live in [`docs/`](./docs): [Assignments](./docs/Assignments.md), [System diagram](./docs/System.md), [P21 connection](./docs/P21_Connection.md).
 
 ## Phase 1
 
