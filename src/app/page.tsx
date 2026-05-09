@@ -29,9 +29,8 @@ export default function Home() {
           </p>
           <a
             href="/sign-in"
-            className="mt-6 flex h-11 items-center justify-center gap-2.5 rounded-md bg-brand-charcoal px-6 text-sm font-medium text-white transition-colors hover:bg-brand-charcoal/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2"
+            className="mt-6 flex h-11 items-center justify-center rounded-md bg-brand-red px-6 text-sm font-medium text-white transition-colors hover:bg-brand-red/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2"
           >
-            <MicrosoftIcon />
             Sign in with Microsoft
           </a>
           <div className="mt-5 flex items-center gap-2 text-xs text-brand-ink-soft">
@@ -55,17 +54,6 @@ export default function Home() {
         © Olander Inc. — Internal tool
       </footer>
     </div>
-  );
-}
-
-function MicrosoftIcon() {
-  return (
-    <svg viewBox="0 0 23 23" width="16" height="16" aria-hidden>
-      <rect x="1" y="1" width="10" height="10" fill="#F25022" />
-      <rect x="12" y="1" width="10" height="10" fill="#7FBA00" />
-      <rect x="1" y="12" width="10" height="10" fill="#00A4EF" />
-      <rect x="12" y="12" width="10" height="10" fill="#FFB900" />
-    </svg>
   );
 }
 
