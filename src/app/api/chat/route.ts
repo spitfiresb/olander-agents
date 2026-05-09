@@ -42,7 +42,7 @@ export async function POST(req: Request) {
   const result = streamText({
     model,
     system: SYSTEM_PROMPT,
-    messages: convertToModelMessages(parsed.data.messages as UIMessage[]),
+    messages: await convertToModelMessages(parsed.data.messages as UIMessage[]),
     abortSignal: req.signal,
     onError: ({ error }) => {
       console.error("[chat] stream error:", error);
