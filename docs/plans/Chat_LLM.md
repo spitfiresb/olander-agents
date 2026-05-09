@@ -126,7 +126,7 @@ Also: the `body { font-family: Arial, ... }` line in `globals.css` was fixed in 
 
 ## App shell / layout (Phase 1)
 
-UI direction takes after the AIVA chatbot reference (`design references/Ai_chatbotui.png`) — translated into our color palette. Cozy surfaces, avatar on assistant, hover affordances on the latest message, suggestion chips on empty state, and a circular icon Send button. Three structural exclusions stand: no model selector tabs (TBD per hard constraints), no right "links to document" panel (no such data), and no left sidebar yet (sidebar lands in Stage 5 when chat-history persistence ships).
+UI direction takes after the AIVA chatbot reference — translated into our color palette. Cozy surfaces, avatar on assistant, hover affordances on the latest message, suggestion chips on empty state, and a circular icon Send button. Three structural exclusions stand: no model selector tabs (TBD per hard constraints), no right "links to document" panel (no such data), and no left sidebar yet (sidebar lands in Stage 5 when chat-history persistence ships).
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -458,7 +458,7 @@ Tokens locked above. Geist confirmed for typeface (revisit later).
 **Verified (without key):** `/api/chat` returns 500 `server_misconfigured` cleanly; UI surfaces "AI service isn't configured yet. Please contact your admin." with Retry. The `req.signal`-on-disconnect verify still pending key.
 
 ### UI polish pass *(complete 2026-05-07, key-independent)*
-Out-of-band polish stage that happened between Stage 2 and Stage 3, after the AIVA chatbot reference (`design references/Ai_chatbotui.png`) was identified as the desired direction. Doesn't shift the next stage; just elevates the visual quality of what's already shipped.
+Out-of-band polish stage that happened between Stage 2 and Stage 3, after the AIVA chatbot reference was identified as the desired direction. Doesn't shift the next stage; just elevates the visual quality of what's already shipped.
 **Shipped:**
 - Real OLANDER mark as inline SVG (`src/components/Logo.tsx`); retired the PNG approach (stayed blurry on retina at hero size).
 - New `--color-brand-canvas: #FAF7F1` token; chat body uses it instead of pure white.
