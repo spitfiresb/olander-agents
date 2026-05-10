@@ -1,7 +1,9 @@
-import { convertToModelMessages, streamText, type UIMessage } from "ai";
+import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from "ai";
 import { z } from "zod";
+import { auth } from "@/auth";
 import { getModel } from "@/lib/ai/model";
 import { SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
+import { tools } from "@/lib/ai/tools";
 
 export const maxDuration = 60;
 
@@ -19,6 +21,15 @@ const BodySchema = z.object({
 });
 
 export async function POST(req: Request) {
+  const devBypass =
+    process.env.NODE_ENV !== "production" && process.env.ALLOW_UNAUTHED_DEV === "1";
+  if (!devBypass) {
+    const session = await auth();
+    if (!session?.user) {
+      return Response.json({ error: "unauthorized" }, { status: 401 });
+    }
+  }
+
   let raw: unknown;
   try {
     raw = await req.json();
@@ -43,6 +54,8 @@ export async function POST(req: Request) {
     model,
     system: SYSTEM_PROMPT,
     messages: await convertToModelMessages(parsed.data.messages as UIMessage[]),
+    tools,
+    stopWhen: stepCountIs(3),
     abortSignal: req.signal,
     onError: ({ error }) => {
       console.error("[chat] stream error:", error);

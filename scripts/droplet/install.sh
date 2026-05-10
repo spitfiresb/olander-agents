@@ -30,6 +30,7 @@ fail() { printf '[install] ERROR: %s\n' "$*" >&2; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HEALTH_PORT="${HEALTH_PORT:-8088}"
+PROXY_PORT="${PROXY_PORT:-8089}"
 EGRESS_HOST="egress.${OLANDER_DOMAIN}"
 
 # --- DNS sanity check (fast fail before doing real work) ---------------------
@@ -94,10 +95,25 @@ log "restarting caddy"
 systemctl enable caddy
 systemctl restart caddy
 
-# --- Scripts (healthcheck + health server) -----------------------------------
+# --- Scripts (healthcheck + health server + proxy server) --------------------
 log "installing scripts to /usr/local/bin"
 install -m 0755 "$SCRIPT_DIR/healthcheck.sh"     /usr/local/bin/olander-healthcheck.sh
 install -m 0755 "$SCRIPT_DIR/health-server.py"   /usr/local/bin/olander-health-server.py
+install -m 0755 "$SCRIPT_DIR/proxy-server.mjs"   /usr/local/bin/olander-proxy-server.mjs
+
+# --- Node.js (for proxy-server.mjs) ------------------------------------------
+log "ensuring nodejs is installed"
+if ! command -v node >/dev/null 2>&1 && ! command -v nodejs >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get install -y -qq nodejs
+fi
+# Ubuntu 24.04 ships the binary as /usr/bin/nodejs without a /usr/bin/node
+# symlink. The systemd unit expects /usr/bin/node — symlink if needed.
+if ! [[ -x /usr/bin/node ]] && [[ -x /usr/bin/nodejs ]]; then
+  ln -sf /usr/bin/nodejs /usr/bin/node
+  log "  symlinked /usr/bin/node → /usr/bin/nodejs"
+fi
+node --version >/dev/null 2>&1 || fail "nodejs failed to install (try: apt-get install nodejs)"
 
 # --- Data dir ----------------------------------------------------------------
 log "ensuring /var/lib/olander-health exists (root:root 0755)"
@@ -134,11 +150,35 @@ else
   log "  /etc/olander-health.env preserved (domain synced to ${OLANDER_DOMAIN})"
 fi
 
+# --- Proxy token / env file --------------------------------------------------
+# Same pattern as olander-health.env: token persists across re-runs; PORT/HOST
+# stay in sync with the current install. P21 credential vars (P21_TOKEN,
+# P21_USERNAME, P21_PASSWORD) are appended by hand once the provider contact provides them —
+# the proxy reads their presence to flip /proxy/healthz creds_present=true.
+log "ensuring /etc/olander-proxy.env (root-owned, 0600)"
+if [[ ! -f /etc/olander-proxy.env ]]; then
+  PROXY_TOKEN_VAL="$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | cut -c1-40)"
+  ( umask 077
+    printf 'OLANDER_PROXY_TOKEN=%s\nPORT=%s\nHOST=127.0.0.1\n' \
+      "$PROXY_TOKEN_VAL" "$PROXY_PORT" > /etc/olander-proxy.env
+  )
+  chmod 0600 /etc/olander-proxy.env
+  chown root:root /etc/olander-proxy.env
+  log "  generated new proxy token; bound proxy-server to 127.0.0.1"
+else
+  PROXY_TOKEN_VAL="$(grep -E '^OLANDER_PROXY_TOKEN=' /etc/olander-proxy.env | cut -d= -f2-)"
+  if ! grep -qE '^HOST=' /etc/olander-proxy.env; then
+    printf 'HOST=127.0.0.1\n' >> /etc/olander-proxy.env
+  fi
+  log "  /etc/olander-proxy.env preserved"
+fi
+
 # --- systemd units -----------------------------------------------------------
 log "installing systemd units"
 install -m 0644 "$SCRIPT_DIR/olander-healthcheck.service" /etc/systemd/system/
 install -m 0644 "$SCRIPT_DIR/olander-healthcheck.timer"   /etc/systemd/system/
 install -m 0644 "$SCRIPT_DIR/olander-health.service"      /etc/systemd/system/
+install -m 0644 "$SCRIPT_DIR/olander-proxy.service"       /etc/systemd/system/
 
 systemctl daemon-reload
 
@@ -154,6 +194,13 @@ sleep 1
 systemctl is-active --quiet olander-health.service \
   || fail "olander-health.service is not active — see 'journalctl -u olander-health.service -n 50'"
 
+log "enabling + starting proxy server (loopback only)"
+systemctl enable olander-proxy.service
+systemctl restart olander-proxy.service
+sleep 1
+systemctl is-active --quiet olander-proxy.service \
+  || fail "olander-proxy.service is not active — see 'journalctl -u olander-proxy.service -n 50'"
+
 log "running one healthcheck immediately to seed latest.json"
 OLANDER_DOMAIN="$OLANDER_DOMAIN" /usr/local/bin/olander-healthcheck.sh \
   || warn "initial healthcheck exited non-zero (will retry on timer)"
@@ -168,6 +215,16 @@ if [[ "$HTTP" != "200" ]]; then
   Check: journalctl -u olander-health.service -n 50"
 fi
 log "  loopback OK (HTTP 200)"
+
+log "verifying proxy server responds on loopback"
+HTTP_PROXY="$(curl -sS -o /dev/null --max-time 5 -w '%{http_code}' \
+  -H "Authorization: Bearer ${PROXY_TOKEN_VAL}" \
+  "http://127.0.0.1:${PROXY_PORT}/proxy/healthz" || true)"
+if [[ "$HTTP_PROXY" != "200" ]]; then
+  fail "proxy server probe (loopback) returned HTTP ${HTTP_PROXY:-<no response>}
+  Check: journalctl -u olander-proxy.service -n 50"
+fi
+log "  proxy loopback OK (HTTP 200)"
 
 # --- End-to-end probe (TLS via public hostname) ------------------------------
 # Wait for Caddy to acquire its Let's Encrypt cert. ACME HTTP-01 typically
@@ -200,6 +257,16 @@ if [[ "$HTTP_AUTH" != "200" ]]; then
 fi
 log "  end-to-end TLS + auth OK (HTTP 200)"
 
+log "verifying proxy auth through public hostname"
+HTTP_PROXY_PUB="$(curl -sS -o /dev/null --max-time 5 -w '%{http_code}' \
+  -H "Authorization: Bearer ${PROXY_TOKEN_VAL}" \
+  "https://${EGRESS_HOST}/proxy/healthz" || true)"
+if [[ "$HTTP_PROXY_PUB" != "200" ]]; then
+  fail "Authenticated proxy probe via https://${EGRESS_HOST}/proxy/healthz returned HTTP ${HTTP_PROXY_PUB:-<no response>}
+  Check: journalctl -u caddy -n 50; journalctl -u olander-proxy.service -n 50"
+fi
+log "  end-to-end proxy TLS + auth OK (HTTP 200)"
+
 # --- Done --------------------------------------------------------------------
 # The token is printed to the operator's terminal (root session).
 # It is NOT logged to journald. Keep this terminal session out of shared
@@ -209,17 +276,25 @@ cat <<EOF
 [install] success.
 
   Health endpoint:  https://${EGRESS_HOST}/health
-  Auth header:      Authorization: Bearer ${TOKEN_VAL}
+  Health token:     ${TOKEN_VAL}
+
+  Proxy base:       https://${EGRESS_HOST}/proxy
+  Proxy token:      ${PROXY_TOKEN_VAL}
 
 Set these in the Next.js app environment:
   DROPLET_HEALTH_URL=https://${EGRESS_HOST}/health
   DROPLET_HEALTH_TOKEN=${TOKEN_VAL}
+  DROPLET_PROXY_URL=https://${EGRESS_HOST}
+  DROPLET_PROXY_TOKEN=${PROXY_TOKEN_VAL}
+
+When P21 credentials arrive, append to /etc/olander-proxy.env (root, 0600):
+  P21_USERNAME=...   (or P21_TOKEN=...)
+  P21_PASSWORD=...
+Then: systemctl restart olander-proxy.service
 
 Useful droplet commands:
-  systemctl status caddy
-  systemctl status olander-healthcheck.timer
-  systemctl status olander-health.service
-  journalctl -u caddy -f
+  systemctl status caddy olander-healthcheck.timer olander-health.service olander-proxy.service
+  journalctl -u olander-proxy.service -f
   journalctl -u olander-health.service -f
   cat /var/lib/olander-health/latest.json | jq
 

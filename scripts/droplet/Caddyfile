@@ -5,12 +5,17 @@
 #   OLANDER_DOMAIN=<agent-domain> caddy validate --config Caddyfile --adapter caddyfile
 
 egress.{$OLANDER_DOMAIN} {
-	# /health is the only public surface. The bearer-token check happens
-	# inside the upstream health-server; Caddy forwards Authorization
-	# untouched (default reverse_proxy behavior).
+	# /health and /proxy/* are the public surfaces. Bearer-token checks happen
+	# inside the upstream services; Caddy forwards Authorization untouched
+	# (default reverse_proxy behavior).
 	@health path /health
 	handle @health {
 		reverse_proxy 127.0.0.1:8088
+	}
+
+	@proxy path /proxy/*
+	handle @proxy {
+		reverse_proxy 127.0.0.1:8089
 	}
 
 	# Everything else gets a flat 404 — don't leak that anything is here.

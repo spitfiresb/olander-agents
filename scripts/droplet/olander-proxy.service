@@ -1,0 +1,36 @@
+[Unit]
+Description=Olander P21 proxy (Layer 2)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/olander-proxy.env
+ExecStart=/usr/bin/node /usr/local/bin/olander-proxy-server.mjs
+Restart=on-failure
+RestartSec=5s
+
+# --- Sandbox -----------------------------------------------------------------
+# Same posture as olander-health.service. Outbound network is required (this
+# service exists to call upstream P21), so RestrictAddressFamilies stays open
+# to AF_INET/AF_INET6.
+DynamicUser=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+PrivateTmp=true
+PrivateDevices=true
+
+# Cap thread/process count. Node is single-threaded but the runtime spawns
+# worker threads for crypto/dns; 50 is comfortable headroom on this 512MB box.
+TasksMax=50
+MemoryMax=192M
+
+[Install]
+WantedBy=multi-user.target

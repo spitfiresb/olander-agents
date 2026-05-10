@@ -19,6 +19,10 @@ P21_PROBE_URL="${P21_PROBE_URL:-https://${P21_HOST}/prophet21/}"
 # OLANDER_DOMAIN is optional. If set, we add a TLS-expiry check for
 # egress.<domain> to the JSON record. If unset, the field is omitted.
 OLANDER_DOMAIN="${OLANDER_DOMAIN:-}"
+# OLANDER_PROXY_TOKEN is optional. If set, we add a proxy /healthz check
+# (curl 127.0.0.1:8089). If unset, the field is omitted.
+OLANDER_PROXY_TOKEN="${OLANDER_PROXY_TOKEN:-}"
+PROXY_HEALTHZ_URL="${PROXY_HEALTHZ_URL:-http://127.0.0.1:8089/proxy/healthz}"
 DATA_DIR="${DATA_DIR:-/var/lib/olander-health}"
 LATEST_FILE="${DATA_DIR}/latest.json"
 LOG_FILE="${DATA_DIR}/log.jsonl"
@@ -147,6 +151,37 @@ except Exception as e:
   fi
 fi
 
+# --- Check 5: proxy /healthz (only if OLANDER_PROXY_TOKEN is set) ------------
+# Loopback probe of the Layer 2 proxy. Bearer-authenticated, same as the
+# external chat-tool calls. Surfaces "proxy down" before reps notice their
+# inventory questions stop returning data.
+proxy_present=false
+proxy_ok=false
+proxy_creds_present=false
+proxy_status=0
+proxy_latency=0
+if [[ -n "$OLANDER_PROXY_TOKEN" ]]; then
+  proxy_present=true
+  proxy_start="$(now_ms)"
+  proxy_body="$(curl -sS --max-time 8 -w '\n%{http_code}' \
+    -H "Authorization: Bearer ${OLANDER_PROXY_TOKEN}" \
+    "$PROXY_HEALTHZ_URL" 2>/dev/null || true)"
+  proxy_end="$(now_ms)"
+  [[ -n "$proxy_end" && -n "$proxy_start" ]] && proxy_latency=$(( proxy_end - proxy_start ))
+  # Last line of the response is the HTTP status (from -w). Body is the rest.
+  proxy_status_raw="${proxy_body##*$'\n'}"
+  proxy_json="${proxy_body%$'\n'*}"
+  if [[ "$proxy_status_raw" =~ ^[0-9]{3}$ ]]; then
+    proxy_status="$proxy_status_raw"
+  fi
+  if [[ "$proxy_status" == "200" ]]; then
+    proxy_ok=true
+    if [[ "$proxy_json" == *'"creds_present":true'* ]]; then
+      proxy_creds_present=true
+    fi
+  fi
+fi
+
 # --- Aggregate ---------------------------------------------------------------
 if [[ "$egress_ok" == "true" && "$dns_ok" == "true" && "$p21_ok" == "true" ]]; then
   overall="ok"
@@ -162,6 +197,10 @@ fi
 if [[ "$tls_present" == "true" && "$tls_ok" == "false" && "$overall" == "ok" ]]; then
   overall="degraded"
 fi
+# Proxy down is degraded (network plumbing still good; only Layer 2 is broken).
+if [[ "$proxy_present" == "true" && "$proxy_ok" == "false" && "$overall" == "ok" ]]; then
+  overall="degraded"
+fi
 
 # --- Build JSON via python (handles all escaping) ----------------------------
 record="$(
@@ -171,6 +210,7 @@ record="$(
   DNS_OK="$dns_ok" DNS_VALUE="$resolved_ip" DNS_EXPECTED="$P21_EXPECTED_DNS" \
   P21_OK="$p21_ok" P21_STATUS="$p21_status" P21_LATENCY="$p21_latency" P21_URL="$P21_PROBE_URL" \
   TLS_PRESENT="$tls_present" TLS_OK="$tls_ok" TLS_HOURS="$tls_hours" TLS_EXPIRES_AT="$tls_expires_at" \
+  PROXY_PRESENT="$proxy_present" PROXY_OK="$proxy_ok" PROXY_STATUS="$proxy_status" PROXY_LATENCY="$proxy_latency" PROXY_CREDS="$proxy_creds_present" PROXY_URL="$PROXY_HEALTHZ_URL" \
   python3 -c '
 import json, os
 e = os.environ
@@ -185,6 +225,8 @@ checks = {
 }
 if b("TLS_PRESENT"):
   checks["tls_cert"] = {"ok": b("TLS_OK"), "hours_until_expiry": i("TLS_HOURS"), "expires_at": e["TLS_EXPIRES_AT"]}
+if b("PROXY_PRESENT"):
+  checks["proxy_up"] = {"ok": b("PROXY_OK"), "http_status": i("PROXY_STATUS"), "latency_ms": i("PROXY_LATENCY"), "creds_present": b("PROXY_CREDS"), "url": e["PROXY_URL"]}
 print(json.dumps({
   "checked_at": e["CHECKED_AT"],
   "overall":    e["OVERALL"],

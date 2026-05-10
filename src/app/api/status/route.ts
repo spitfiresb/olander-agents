@@ -21,6 +21,8 @@ type DropletPayload = {
       egress_ip: DropletCheckResult;
       dns_override: DropletCheckResult;
       p21_reachable: DropletCheckResult;
+      tls_cert?: DropletCheckResult & { hours_until_expiry?: number; expires_at?: string };
+      proxy_up?: DropletCheckResult & { creds_present?: boolean };
     };
   };
   uptime: Record<"1h" | "24h" | "7d", { checks: number; ok: number; pct: number | null }>;
@@ -87,8 +89,12 @@ async function fetchDroplet(): Promise<ServiceCard> {
   const state: ServiceState = stateMap[latest.overall];
 
   let message: string;
+  const proxy = latest.checks.proxy_up;
   if (state === "operational") {
-    message = "All checks passing";
+    message =
+      proxy && proxy.ok && proxy.creds_present === false
+        ? "All checks passing — proxy awaiting P21 credentials"
+        : "All checks passing";
   } else {
     const failing: string[] = [];
     if (!latest.checks.egress_ip.ok) failing.push("egress IP mismatch");
@@ -97,6 +103,8 @@ async function fetchDroplet(): Promise<ServiceCard> {
       const code = latest.checks.p21_reachable.http_status;
       failing.push(code ? `P21 HTTP ${code}` : "P21 unreachable");
     }
+    if (latest.checks.tls_cert && !latest.checks.tls_cert.ok) failing.push("TLS cert near expiry");
+    if (proxy && !proxy.ok) failing.push("Layer 2 proxy down");
     message = failing.join(", ") || (state === "degraded" ? "Degraded" : "Down");
   }
 

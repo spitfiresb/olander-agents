@@ -5,9 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-# Optional: pulls OLANDER_DOMAIN (and other tunables) so the script's TLS-expiry
-# check can reach egress.<domain>. The leading `-` makes the file optional —
-# the script gracefully skips checks whose env vars aren't set.
+# Both env files are optional — the script gracefully skips checks whose env
+# vars aren't set. olander-health.env supplies OLANDER_DOMAIN (TLS check);
+# olander-proxy.env supplies OLANDER_PROXY_TOKEN (proxy /healthz check).
 EnvironmentFile=-/etc/olander-health.env
+EnvironmentFile=-/etc/olander-proxy.env
 ExecStart=/usr/local/bin/olander-healthcheck.sh
 User=root
