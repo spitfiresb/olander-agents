@@ -1,0 +1,40 @@
+[Unit]
+Description=Olander health HTTP server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/olander-health.env
+ExecStart=/usr/bin/python3 /usr/local/bin/olander-health-server.py
+Restart=on-failure
+RestartSec=5s
+
+# --- Sandbox -----------------------------------------------------------------
+# Run as an ephemeral system user systemd manages for us. Combined with
+# ProtectSystem=strict, the process can't write anywhere on disk by default.
+# /var/lib/olander-health is read-only to this service (the healthcheck timer
+# writes it as root); the server only reads.
+DynamicUser=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+PrivateTmp=true
+PrivateDevices=true
+ReadOnlyPaths=/var/lib/olander-health
+
+# Cap thread/process count. The Python server uses ThreadingHTTPServer with
+# no built-in bound; TasksMax stops a flood of requests from forking unlimited
+# threads on this 512MB droplet.
+TasksMax=20
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target

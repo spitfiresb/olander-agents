@@ -1,0 +1,13 @@
+[Unit]
+Description=Olander P21 egress healthcheck (one-shot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Optional: pulls OLANDER_DOMAIN (and other tunables) so the script's TLS-expiry
+# check can reach egress.<domain>. The leading `-` makes the file optional —
+# the script gracefully skips checks whose env vars aren't set.
+EnvironmentFile=-/etc/olander-health.env
+ExecStart=/usr/local/bin/olander-healthcheck.sh
+User=root

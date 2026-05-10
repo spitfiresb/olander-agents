@@ -1,0 +1,13 @@
+[Unit]
+Description=Run Olander P21 egress healthcheck every 60s
+After=network-online.target
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=olander-healthcheck.service
+Persistent=false
+
+[Install]
+WantedBy=timers.target

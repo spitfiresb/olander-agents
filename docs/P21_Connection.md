@@ -2,7 +2,10 @@
 
 How to reach Olander's P21 (Epicor Prophet 21) REST API. Access is read-only against the dev/play environment.
 
+> **Scope:** this doc covers the *upstream-specific* connectivity — what makes P21 reachable at all. For the operational details of the egress droplet (Caddy, install.sh, firewall, rebuild runbook), see [`Droplet.md`](./Droplet.md). For where we are on the broader integration (proxy, chatbot tool-calling), see [`P21_Integration.md`](./P21_Integration.md).
+
 Two pieces are required end-to-end:
+
 1. Egress through the whitelisted DigitalOcean droplet (`<proxy-ip>`).
 2. DNS override for `<p21-host>` → `<p21-host-ip>`. The public DNS record points at an RFC1918 address with no public route, so the override is mandatory — there is no path that works on whitelist alone.
 
@@ -16,58 +19,25 @@ All P21 traffic egresses through a DigitalOcean droplet whose Reserved IP is whi
   - `<droplet-ip>` — droplet's primary public IP
   - `10.46.0.5` — droplet's private anchor IP, used by SNAT
 
-### SSH access
-Key-only auth. Alex's keypair: `~/.ssh/olander_p21`.
-
-```
-ssh -i ~/.ssh/olander_p21 root@<proxy-ip>
-```
-
-Optional shorthand — add to `~/.ssh/config`:
-```
-Host olander-p21
-    HostName <proxy-ip>
-    User root
-    IdentityFile ~/.ssh/olander_p21
-    IdentitiesOnly yes
-```
-Then: `ssh olander-p21`.
-
-To grant another dev access, append their public key to `/root/.ssh/authorized_keys`. The droplet is a network hop, not a dev environment — most devs never need to SSH in.
-
-### SNAT (already configured)
-DigitalOcean Reserved IPs route inbound traffic only by default. Outbound traffic egresses with the droplet's primary IP (`<droplet-ip>`) unless SNAT rewrites the source. Without SNAT, the hosting provider sees an unwhitelisted source IP and blocks the call.
-
-The rule maps outbound traffic to the anchor IP (`10.46.0.5`); DO's network maps anchor IP ↔ Reserved IP, so external services see `<proxy-ip>`:
-
-```
-iptables -t nat -A POSTROUTING -o eth0 -j SNAT --to-source 10.46.0.5
-```
-
-Persisted via `iptables-persistent` to `/etc/iptables/rules.v4` — restored automatically on reboot.
-
-Verify from the droplet:
-```
-curl -s https://ifconfig.me
-# expected: <proxy-ip>
-```
-If it returns `<droplet-ip>`, re-run the iptables command above and `netfilter-persistent save`.
+The mechanics of how SNAT rewrites outbound traffic so the hosting provider sees the Reserved IP, plus the iptables rule and persistence, live in [`Droplet.md`](./Droplet.md#snat-already-configured). The whitelist only ever needs to know about `<proxy-ip>`.
 
 ## DNS override for `<p21-host>`
 
 Olander's public DNS publishes `<p21-host> → 10.128.2.11` (RFC1918, no public route). The actual public IP is `<p21-host-ip>`. External clients must override DNS locally — the hosting provider confirmed there is no plan to publish a public A record.
 
 On the droplet, this is one line in `/etc/hosts`:
+
 ```
 <p21-host-ip>  <p21-host>
 ```
 
-Already installed. Verify:
+Already installed by `scripts/droplet/provision.sh` and verified by the healthcheck every 60s. To verify manually from the droplet:
+
 ```
 getent hosts <p21-host>
 # expected: <p21-host-ip>    <p21-host>
 
-curl -sS -o /dev/null -w 'HTTP %{http_code}\n' 'https://<p21-host>/prophet21/#/login'
+curl -sS -o /dev/null -w 'HTTP %{http_code}\n' 'https://<p21-host>/prophet21/'
 # expected: HTTP 200
 ```
 
@@ -93,28 +63,11 @@ Launch an isolated Chrome window that uses the tunnel **and** overrides DNS for 
 
 Tear down when done: `pkill -f "ssh.*-D 127.0.0.1:1080"`.
 
-## Rebuilding or replacing the droplet
+## Manually exploring the API from the droplet
 
-The Reserved IP, SNAT rule, and `/etc/hosts` override are the three pieces that make access work end-to-end. To rebuild without breaking access:
+While we wait on auth credentials and endpoint docs from the provider contact (see [`P21_Integration.md`](./P21_Integration.md)), the droplet itself is the simplest way to poke at P21 endpoints — it inherits both the SNAT egress and the `/etc/hosts` override automatically:
 
-1. Spin up the new droplet. Stay in SFO2 — the Reserved IP is region-locked, and changing regions means refiling the whitelist.
-2. In **Networking → Reserved IPs**, detach `<proxy-ip>` from the old droplet and reassign it to the new one.
-3. SSH into the new droplet and re-run:
-   ```
-   export DEBIAN_FRONTEND=noninteractive
-   ANCHOR_IP=$(curl -s http://169.254.169.254/metadata/v1/interfaces/public/0/anchor_ipv4/address)
-   iptables -t nat -A POSTROUTING -o eth0 -j SNAT --to-source "$ANCHOR_IP"
-   apt-get update -qq && apt-get install -y iptables-persistent
-   netfilter-persistent save
-   echo "<p21-host-ip>  <p21-host>" >> /etc/hosts
-   curl -s https://ifconfig.me                                              # must print <proxy-ip>
-   curl -sS -o /dev/null -w 'HTTP %{http_code}\n' 'https://<p21-host>/prophet21/#/login'  # must print HTTP 200
-   ```
-4. Destroy the old droplet.
-
-The whitelist at the hosting provider does not change.
-
-## Notes
-
-- `ufw` was removed during the `iptables-persistent` install (they conflict). No firewall is currently active. If one is needed later, add iptables rules directly and `netfilter-persistent save` will persist them.
-- The droplet is an egress hop only. The proxy service the chatbot calls will live here, added once the API auth method is known.
+```
+ssh -i ~/.ssh/olander_p21 root@<proxy-ip>
+curl -sS 'https://<p21-host>/<endpoint>' -H 'Authorization: <when we have it>'
+```

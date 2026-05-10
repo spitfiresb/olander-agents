@@ -10,7 +10,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ### Data API (referred to as P21, Prophet 21, Epicor, Olander API)
 
-- **Connecting to the API** (whitelisted egress, DNS override, local Chrome access): `docs/P21_Connection.md`
+- **Reaching the API** (the hosting provider whitelist, RFC1918 DNS override, browser tunneling): `docs/P21_Connection.md`
+- **Droplet operations** (Caddy/TLS, install.sh, firewall, systemd, rebuild runbook): `docs/Droplet.md`
+- **Integration status** (3-layer model, what's done, what's blocked, roadmap): `docs/P21_Integration.md`
 
 ### Database (Neon Postgres + Drizzle + Auth.js adapter)
 
