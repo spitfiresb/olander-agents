@@ -7,15 +7,32 @@ import { tools } from "@/lib/ai/tools";
 
 export const maxDuration = 60;
 
+// User-role parts must be text-only. `z.unknown()` would let a caller embed a
+// forged `tool-result` part that the model treats as authoritative output —
+// benign today (inventorySearch is read-only) but an authorization-spoofing
+// vector the moment a mutating tool lands. Assistant parts stay permissive
+// because the client replays tool-call/tool-result history from prior turns;
+// the only real fix for that is server-persisted message state.
+const UserTextPart = z.object({
+  type: z.literal("text"),
+  text: z.string(),
+});
+
+const UserMessage = z.object({
+  id: z.string(),
+  role: z.literal("user"),
+  parts: z.array(UserTextPart).min(1),
+});
+
+const AssistantMessage = z.object({
+  id: z.string(),
+  role: z.literal("assistant"),
+  parts: z.array(z.unknown()),
+});
+
 const BodySchema = z.object({
   messages: z
-    .array(
-      z.object({
-        id: z.string(),
-        role: z.enum(["system", "user", "assistant"]),
-        parts: z.array(z.unknown()),
-      }),
-    )
+    .array(z.discriminatedUnion("role", [UserMessage, AssistantMessage]))
     .min(1)
     .max(50),
 });
