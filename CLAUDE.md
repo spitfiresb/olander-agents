@@ -12,6 +12,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 - **Connecting to the API** (whitelisted egress, DNS override, local Chrome access): `docs/P21_Connection.md`
 
+### Database (Neon Postgres + Drizzle + Auth.js adapter)
+
+- **Connection topology, schema, migration workflow, history of the Vercel-Neon consolidation**: `docs/db.md`. Read before touching `src/db/`, `drizzle/`, or anything that talks to Postgres. Especially: there is exactly **one** Neon project (`<neon-project-id>`, Vercel-managed) — do not create a second one.
+
 ## Product vision
 Read `VISION.md` before making product decisions, adding features, or changing UX. Stability over features. Activation over new capabilities. No feature creep.
 
