@@ -1,5 +1,5 @@
 import { Wordmark } from "@/components/Wordmark";
-import { signIn } from "@/auth";
+import { SignInPanel } from "./SignInPanel";
 
 export default function Home() {
   return (
@@ -12,7 +12,7 @@ export default function Home() {
             "radial-gradient(ellipse 80% 60% at 50% 0%, rgba(228, 217, 197, 0.55) 0%, transparent 70%)",
         }}
       />
-      <main className="relative flex flex-1 flex-col items-center justify-center px-6 py-12">
+      <main className="relative flex flex-1 flex-col items-center justify-start px-6 pb-12 pt-[22vh]">
         <div className="mb-10 flex flex-col items-center text-center">
           <Wordmark variant="hero" />
           <p className="mt-4 max-w-sm text-sm text-brand-ink-soft sm:text-base">
@@ -21,31 +21,7 @@ export default function Home() {
           </p>
         </div>
 
-        <div className="w-full max-w-sm rounded-2xl border border-brand-charcoal/10 bg-white p-7 shadow-[0_8px_32px_-12px_rgba(45,46,41,0.12)]">
-          <h1 className="text-xl font-semibold tracking-tight text-brand-charcoal">
-            Sign in
-          </h1>
-          <p className="mt-1.5 text-sm text-brand-ink-soft">
-            Continue with your Olander Microsoft account.
-          </p>
-          <form
-            action={async () => {
-              "use server";
-              await signIn("microsoft-entra-id", { redirectTo: "/chat" });
-            }}
-          >
-            <button
-              type="submit"
-              className="mt-6 flex h-11 w-full items-center justify-center rounded-md bg-brand-red px-6 text-sm font-medium text-white transition-colors hover:bg-brand-red/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2"
-            >
-              Sign in with Microsoft
-            </button>
-          </form>
-          <div className="mt-5 flex items-center gap-2 text-xs text-brand-ink-soft">
-            <LockIcon />
-            Internal use — authorized employees only.
-          </div>
-        </div>
+        <SignInPanel />
 
         <p className="mt-6 text-center text-xs text-brand-ink-soft">
           Need help signing in?{" "}
@@ -62,25 +38,5 @@ export default function Home() {
         © Olander Inc. — Internal tool
       </footer>
     </div>
-  );
-}
-
-function LockIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      width="13"
-      height="13"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-      className="shrink-0"
-    >
-      <rect x="3" y="7" width="10" height="7" rx="1.5" />
-      <path d="M5.5 7V4.5a2.5 2.5 0 0 1 5 0V7" />
-    </svg>
   );
 }
