@@ -7,7 +7,7 @@ Reads:
   /var/lib/olander-health/log.jsonl    — rolling history (1 line per check)
 
 Endpoints:
-  GET /health    — { latest: {...}, uptime: { "1h": {...}, "24h": {...}, "7d": {...} } }
+  GET /health    — { latest, uptime: { "1h", "24h", "7d" }, daily: [{date,pct,...}] }
 
 Auth:
   Bearer token. Set OLANDER_HEALTH_TOKEN in the environment (systemd EnvironmentFile).
@@ -35,6 +35,15 @@ PORT = int(os.environ.get("PORT", "8088"))
 HOST = os.environ.get("HOST", "0.0.0.0")
 
 WINDOWS = {"1h": timedelta(hours=1), "24h": timedelta(hours=24), "7d": timedelta(days=7)}
+DAILY_DAYS = 90  # how many trailing UTC days the /health response includes
+
+# In-memory cache for the bucketed log. Healthcheck appends to log.jsonl at
+# most once per 60s, so a 30s cache costs at most one stale window — well
+# inside the noise floor of "what does the dashboard show right now" — while
+# capping per-request CPU at "read one dict from a tuple" instead of "parse
+# 30 MB of JSONL." Cheap-droplet hygiene.
+_CACHE_TTL_SECONDS = 30
+_cache = None  # {"at": float, "uptime": ..., "daily": ...} or None
 
 logging.basicConfig(level=logging.INFO, format="[health-server] %(message)s")
 log = logging.getLogger("health-server")
@@ -59,10 +68,71 @@ def parse_iso(ts):
     return datetime.fromisoformat(ts)
 
 
-def compute_uptime(now):
-    """Stream the log once, bucket each line into every applicable window."""
-    buckets = {k: {"checks": 0, "ok": 0} for k in WINDOWS}
+def _empty_buckets(windows):
+    return {k: {"checks": 0, "ok": 0} for k in windows}
+
+
+def _empty_daily(today):
+    out = {}
+    for i in range(DAILY_DAYS - 1, -1, -1):
+        d = today - timedelta(days=i)
+        out[d.isoformat()] = {"checks": 0, "ok": 0}
+    return out
+
+
+def _bucket_record(record_ok, ts, cutoffs, buckets, daily, daily_cutoff):
+    for window, cutoff in cutoffs.items():
+        if ts >= cutoff:
+            buckets[window]["checks"] += 1
+            if record_ok:
+                buckets[window]["ok"] += 1
+    day = ts.date()
+    if day >= daily_cutoff:
+        key = day.isoformat()
+        if key in daily:
+            daily[key]["checks"] += 1
+            if record_ok:
+                daily[key]["ok"] += 1
+
+
+def _format(buckets, daily):
+    uptime = {}
+    for window, b in buckets.items():
+        pct = (b["ok"] / b["checks"] * 100) if b["checks"] else None
+        uptime[window] = {
+            "checks": b["checks"],
+            "ok": b["ok"],
+            "pct": round(pct, 3) if pct is not None else None,
+        }
+    daily_out = []
+    for date in sorted(daily.keys()):
+        b = daily[date]
+        pct = (b["ok"] / b["checks"] * 100) if b["checks"] else None
+        daily_out.append({
+            "date": date,
+            "checks": b["checks"],
+            "ok": b["ok"],
+            "pct": round(pct, 3) if pct is not None else None,
+        })
+    return uptime, daily_out
+
+
+def compute_uptime_and_daily(now):
+    """Stream the log once, bucket records for both P21 and Anthropic.
+
+    Records written before the Anthropic probe was added don't have a
+    `checks.anthropic` field — those are skipped from the Anthropic stats so
+    we never count "no data" as either uptime or downtime.
+    """
     cutoffs = {k: now - delta for k, delta in WINDOWS.items()}
+    today = now.date()
+    daily_cutoff = today - timedelta(days=DAILY_DAYS - 1)
+
+    p21_buckets = _empty_buckets(WINDOWS)
+    p21_daily = _empty_daily(today)
+    anth_buckets = _empty_buckets(WINDOWS)
+    anth_daily = _empty_daily(today)
+
     try:
         with open(LOG_FILE, "r") as f:
             for line in f:
@@ -74,24 +144,34 @@ def compute_uptime(now):
                     ts = parse_iso(rec["checked_at"])
                 except (json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError):
                     continue
-                ok = rec.get("overall") == "ok"
-                for window, cutoff in cutoffs.items():
-                    if ts >= cutoff:
-                        buckets[window]["checks"] += 1
-                        if ok:
-                            buckets[window]["ok"] += 1
+                # P21 health: existing semantics — overall == "ok" passes.
+                _bucket_record(
+                    rec.get("overall") == "ok",
+                    ts, cutoffs, p21_buckets, p21_daily, daily_cutoff,
+                )
+                # Anthropic: only count records that observed it.
+                anth = (rec.get("checks") or {}).get("anthropic")
+                if isinstance(anth, dict):
+                    _bucket_record(
+                        anth.get("ok") is True,
+                        ts, cutoffs, anth_buckets, anth_daily, daily_cutoff,
+                    )
     except FileNotFoundError:
         pass
 
-    out = {}
-    for window, b in buckets.items():
-        pct = (b["ok"] / b["checks"] * 100) if b["checks"] else None
-        out[window] = {
-            "checks": b["checks"],
-            "ok": b["ok"],
-            "pct": round(pct, 3) if pct is not None else None,
-        }
-    return out
+    p21_uptime, p21_daily_out = _format(p21_buckets, p21_daily)
+    anth_uptime, anth_daily_out = _format(anth_buckets, anth_daily)
+    return p21_uptime, p21_daily_out, anth_uptime, anth_daily_out
+
+
+def get_cached_uptime_and_daily(now):
+    global _cache
+    now_ts = now.timestamp()
+    if _cache is not None and (now_ts - _cache["at"]) < _CACHE_TTL_SECONDS:
+        return _cache["data"]
+    data = compute_uptime_and_daily(now)
+    _cache = {"at": now_ts, "data": data}
+    return data
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -126,9 +206,16 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         latest = load_latest()
-        uptime = compute_uptime(datetime.now(timezone.utc))
+        p21_uptime, p21_daily, anth_uptime, anth_daily = get_cached_uptime_and_daily(
+            datetime.now(timezone.utc)
+        )
         body = json.dumps(
-            {"latest": latest, "uptime": uptime},
+            {
+                "latest": latest,
+                "uptime": p21_uptime,
+                "daily": p21_daily,
+                "anthropic": {"uptime": anth_uptime, "daily": anth_daily},
+            },
             separators=(",", ":"),
         ).encode()
 

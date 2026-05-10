@@ -13,6 +13,21 @@ type DropletCheckResult = {
   latency_ms?: number;
 };
 
+type Day = {
+  date: string; // YYYY-MM-DD (UTC)
+  pct: number | null; // null = no data recorded that day
+  checks?: number;
+};
+
+type Window = { checks: number; ok: number; pct: number | null };
+
+type AnthropicCheck = {
+  ok: boolean;
+  indicator?: string;
+  http_status?: number;
+  latency_ms?: number;
+};
+
 type DropletPayload = {
   latest: null | {
     checked_at: string;
@@ -23,22 +38,30 @@ type DropletPayload = {
       p21_reachable: DropletCheckResult;
       tls_cert?: DropletCheckResult & { hours_until_expiry?: number; expires_at?: string };
       proxy_up?: DropletCheckResult & { creds_present?: boolean };
+      anthropic?: AnthropicCheck;
     };
   };
-  uptime: Record<"1h" | "24h" | "7d", { checks: number; ok: number; pct: number | null }>;
+  uptime: Record<"1h" | "24h" | "7d", Window>;
+  daily?: Day[];
+  anthropic?: {
+    uptime: Record<"1h" | "24h" | "7d", Window>;
+    daily: Day[];
+  };
 };
 
-type ServiceCard = {
+type Service = {
   id: string;
   name: string;
   description: string;
   state: ServiceState;
   message: string;
   checked_at: string | null;
-  details?: Record<string, unknown>;
+  uptime_pct: number | null; // headline uptime over the visible window
+  days: Day[]; // 90 entries, oldest → newest (today last)
 };
 
 const FETCH_TIMEOUT_MS = 8000;
+const WINDOW_DAYS = 90;
 
 async function fetchWithTimeout(url: string, init: RequestInit = {}) {
   const ctrl = new AbortController();
@@ -50,47 +73,113 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}) {
   }
 }
 
-async function fetchDroplet(): Promise<ServiceCard> {
-  const base: ServiceCard = {
-    id: "p21",
-    name: "Olander API (P21)",
-    description: "Egress droplet → P21 Prophet 21",
-    state: "unknown",
-    message: "Not configured",
-    checked_at: null,
-  };
+// Build a 90-element array of UTC dates, oldest → newest.
+function emptyDays(): Day[] {
+  const out: Day[] = [];
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  for (let i = WINDOW_DAYS - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setUTCDate(d.getUTCDate() - i);
+    out.push({ date: d.toISOString().slice(0, 10), pct: null });
+  }
+  return out;
+}
 
+// Merge whatever the droplet returned into a 90-day window. If the droplet
+// hasn't been upgraded to expose `daily` yet, we fall back to filling only
+// "today" from the latest aggregate so the bar isn't entirely empty.
+function buildDays(payload: DropletPayload | null): Day[] {
+  const days = emptyDays();
+  if (!payload) return days;
+  const byDate = new Map(days.map((d, i) => [d.date, i]));
+
+  if (Array.isArray(payload.daily)) {
+    for (const d of payload.daily) {
+      const i = byDate.get(d.date);
+      if (i !== undefined) days[i] = { ...days[i], pct: d.pct, checks: d.checks };
+    }
+    return days;
+  }
+
+  // Fallback: stamp today's cell using the 24h aggregate.
+  const todayPct = payload.uptime?.["24h"]?.pct ?? null;
+  if (todayPct !== null) {
+    days[days.length - 1] = { ...days[days.length - 1], pct: todayPct };
+  }
+  return days;
+}
+
+function indicatorToState(indicator: string | undefined): ServiceState {
+  if (!indicator || indicator === "unknown") return "unknown";
+  if (indicator === "none") return "operational";
+  if (indicator === "minor" || indicator === "maintenance") return "degraded";
+  if (indicator === "major" || indicator === "critical") return "down";
+  return "unknown";
+}
+
+function buildAnthropicDays(payload: DropletPayload | null): Day[] {
+  const days = emptyDays();
+  if (!payload?.anthropic?.daily) return days;
+  const byDate = new Map(days.map((d, i) => [d.date, i]));
+  for (const d of payload.anthropic.daily) {
+    const i = byDate.get(d.date);
+    if (i !== undefined) days[i] = { ...days[i], pct: d.pct, checks: d.checks };
+  }
+  return days;
+}
+
+async function fetchDropletPayload(): Promise<{
+  payload: DropletPayload | null;
+  error: string | null;
+}> {
   const url = process.env.DROPLET_HEALTH_URL;
   const token = process.env.DROPLET_HEALTH_TOKEN;
   if (!url || !token) {
-    return { ...base, message: "DROPLET_HEALTH_URL/TOKEN not set" };
+    return { payload: null, error: "DROPLET_HEALTH_URL/TOKEN not set" };
   }
-
-  let payload: DropletPayload | null = null;
   try {
     const res = await fetchWithTimeout(url, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) {
-      return { ...base, state: "down", message: `Health endpoint returned HTTP ${res.status}` };
+      return { payload: null, error: `Health endpoint returned HTTP ${res.status}` };
     }
-    payload = (await res.json()) as DropletPayload;
+    return { payload: (await res.json()) as DropletPayload, error: null };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { ...base, state: "down", message: `Could not reach health endpoint: ${msg}` };
+    return { payload: null, error: `Could not reach health endpoint: ${msg}` };
   }
+}
 
+function buildP21Service(
+  payload: DropletPayload | null,
+  error: string | null,
+): Service {
+  const base: Service = {
+    id: "p21",
+    name: "P21 connection",
+    description: "End-to-end check from our egress droplet to P21",
+    state: "unknown",
+    message: "Not configured",
+    checked_at: null,
+    uptime_pct: null,
+    days: emptyDays(),
+  };
+  if (error) {
+    return { ...base, state: "down", message: error };
+  }
+  if (!payload) {
+    return base;
+  }
   const latest = payload.latest;
   if (!latest) {
-    return { ...base, state: "unknown", message: "No checks recorded yet" };
+    return { ...base, message: "No checks recorded yet" };
   }
-
   const stateMap = { ok: "operational", degraded: "degraded", down: "down" } as const;
   const state: ServiceState = stateMap[latest.overall];
 
-  // Operational message stays generic; "awaiting P21 credentials" leaks
-  // ops-state to the unauthenticated /api/status. Failure labels are kept
-  // because they are symbolic ("P21 HTTP 500") and don't include raw IPs/URLs.
+  // Symbolic labels only — never expose IPs/URLs from latest.checks.
   let message: string;
   if (state === "operational") {
     message = "All checks passing";
@@ -107,34 +196,56 @@ async function fetchDroplet(): Promise<ServiceCard> {
     message = failing.join(", ") || (state === "degraded" ? "Degraded" : "Down");
   }
 
-  // Don't expose latest.checks: it carries the egress IP, DNS-override target,
-  // P21 probe URL, loopback URL, and creds_present flag. The status UI only
-  // consumes state/message/checked_at/uptime — none of the raw checks.
+  const days = buildDays(payload);
   return {
     ...base,
     state,
     message,
     checked_at: latest.checked_at,
-    details: {
-      uptime: payload.uptime,
-    },
+    uptime_pct: computeWindowPct(days),
+    days,
   };
 }
 
-async function fetchAnthropic(): Promise<ServiceCard> {
-  const base: ServiceCard = {
+async function buildAnthropicService(
+  payload: DropletPayload | null,
+): Promise<Service> {
+  const base: Service = {
     id: "anthropic",
     name: "Anthropic API",
     description: "Powers the chat assistant",
     state: "unknown",
     message: "—",
     checked_at: null,
+    uptime_pct: null,
+    days: emptyDays(),
   };
 
+  // Preferred path: the droplet observed Anthropic in its last check.
+  const latestAnth = payload?.latest?.checks?.anthropic;
+  if (latestAnth) {
+    const state = indicatorToState(latestAnth.indicator);
+    const days = buildAnthropicDays(payload);
+    return {
+      ...base,
+      state,
+      message: latestAnth.ok
+        ? "All systems operational"
+        : `Status: ${latestAnth.indicator ?? "unknown"}`,
+      checked_at: payload?.latest?.checked_at ?? null,
+      uptime_pct: computeWindowPct(days),
+      days,
+    };
+  }
+
+  // Fallback: hit Anthropic's status API directly. Used during the deploy
+  // window before the updated healthcheck has run on the droplet, or if the
+  // droplet is unreachable.
   try {
-    const res = await fetchWithTimeout("https://status.anthropic.com/api/v2/status.json", {
-      redirect: "follow",
-    });
+    const res = await fetchWithTimeout(
+      "https://status.anthropic.com/api/v2/status.json",
+      { redirect: "follow" },
+    );
     if (!res.ok) {
       return { ...base, state: "down", message: `Anthropic status returned HTTP ${res.status}` };
     }
@@ -142,24 +253,18 @@ async function fetchAnthropic(): Promise<ServiceCard> {
       page?: { updated_at?: string };
       status?: { indicator?: string; description?: string };
     };
-    const indicator = json.status?.indicator ?? "none";
-    const description = json.status?.description ?? "Unknown";
-
-    const state: ServiceState =
-      indicator === "none"
-        ? "operational"
-        : indicator === "minor" || indicator === "maintenance"
-          ? "degraded"
-          : indicator === "major" || indicator === "critical"
-            ? "down"
-            : "unknown";
-
+    const state = indicatorToState(json.status?.indicator);
+    const days = emptyDays();
+    days[days.length - 1] = {
+      ...days[days.length - 1],
+      pct: state === "operational" ? 100 : state === "degraded" ? 95 : 50,
+    };
     return {
       ...base,
       state,
-      message: description,
+      message: json.status?.description ?? "Unknown",
       checked_at: json.page?.updated_at ?? null,
-      details: { indicator },
+      days,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -167,8 +272,17 @@ async function fetchAnthropic(): Promise<ServiceCard> {
   }
 }
 
+function computeWindowPct(days: Day[]): number | null {
+  const real = days.filter((d) => d.pct !== null);
+  if (real.length === 0) return null;
+  const sum = real.reduce((acc, d) => acc + (d.pct ?? 0), 0);
+  return sum / real.length;
+}
+
 export async function GET() {
-  const [p21, anthropic] = await Promise.all([fetchDroplet(), fetchAnthropic()]);
+  const { payload, error } = await fetchDropletPayload();
+  const p21 = buildP21Service(payload, error);
+  const anthropic = await buildAnthropicService(payload);
   return NextResponse.json(
     { fetched_at: new Date().toISOString(), services: [p21, anthropic] },
     { headers: { "Cache-Control": "no-store" } },

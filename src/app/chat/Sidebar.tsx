@@ -38,35 +38,13 @@ export function Sidebar({ onNewChat }: { onNewChat: () => void }) {
       </div>
 
       <div className="border-t border-white/10 px-3 py-3">
-        <a
-          href="mailto:support@example.com"
-          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-white/60 transition-colors hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal"
+        <Link
+          href="/status"
+          className="block rounded-md px-2 py-1.5 text-xs text-white/60 transition-colors hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal"
         >
-          <HelpIcon />
-          Need help? Contact IT
-        </a>
+          Service status
+        </Link>
       </div>
     </aside>
-  );
-}
-
-function HelpIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      width="13"
-      height="13"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-      className="shrink-0"
-    >
-      <circle cx="8" cy="8" r="6.5" />
-      <path d="M6 6.5a2 2 0 1 1 2.7 1.9c-.4.2-.7.5-.7 1V10" />
-      <circle cx="8" cy="12" r="0.5" fill="currentColor" />
-    </svg>
   );
 }

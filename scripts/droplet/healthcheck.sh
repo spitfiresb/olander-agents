@@ -16,6 +16,7 @@ EXPECTED_EGRESS_IP="${EXPECTED_EGRESS_IP:-<proxy-ip>}"
 P21_HOST="${P21_HOST:-<p21-host>}"
 P21_EXPECTED_DNS="${P21_EXPECTED_DNS:-<p21-host-ip>}"
 P21_PROBE_URL="${P21_PROBE_URL:-https://${P21_HOST}/prophet21/}"
+ANTHROPIC_STATUS_URL="${ANTHROPIC_STATUS_URL:-https://status.anthropic.com/api/v2/status.json}"
 # OLANDER_DOMAIN is optional. If set, we add a TLS-expiry check for
 # egress.<domain> to the JSON record. If unset, the field is omitted.
 OLANDER_DOMAIN="${OLANDER_DOMAIN:-}"
@@ -26,9 +27,11 @@ PROXY_HEALTHZ_URL="${PROXY_HEALTHZ_URL:-http://127.0.0.1:8089/proxy/healthz}"
 DATA_DIR="${DATA_DIR:-/var/lib/olander-health}"
 LATEST_FILE="${DATA_DIR}/latest.json"
 LOG_FILE="${DATA_DIR}/log.jsonl"
-# Cap log to ~7 days of 60s checks (10080 lines). Trim if it grows past 11000.
-LOG_MAX_LINES=11000
-LOG_TRIM_TO=10080
+# Cap log to ~90 days of 60s checks (90 * 1440 = 129600 lines).
+# At ~250 bytes/line, that's ~32 MB on disk — fine for the droplet.
+# The web /status page renders a 90-day per-UTC-day uptime bar from this log.
+LOG_MAX_LINES=135000
+LOG_TRIM_TO=129600
 # TLS-expiry thresholds (hours). >warn = ok; warn..crit = degraded; <crit = down.
 TLS_WARN_HOURS=168   # 7 days
 TLS_CRIT_HOURS=24    # 1 day
@@ -182,6 +185,34 @@ if [[ -n "$OLANDER_PROXY_TOKEN" ]]; then
   fi
 fi
 
+# --- Check 6: Anthropic API status (third-party reference) ------------------
+# Polls Anthropic's public Statuspage. Their state never affects our `overall`
+# — if Anthropic is down, our P21 plumbing is still ours to monitor. We log
+# it so the dashboard can show their reliability alongside ours.
+anth_ok=false
+anth_indicator="unknown"
+anth_status=0
+anth_latency=0
+anth_start="$(now_ms)"
+anth_body="$(curl -sSL --max-time 8 -w '\n%{http_code}' "$ANTHROPIC_STATUS_URL" 2>/dev/null || true)"
+anth_end="$(now_ms)"
+[[ -n "$anth_end" && -n "$anth_start" ]] && anth_latency=$(( anth_end - anth_start ))
+anth_status_raw="${anth_body##*$'\n'}"
+anth_json="${anth_body%$'\n'*}"
+if [[ "$anth_status_raw" =~ ^[0-9]{3}$ ]]; then
+  anth_status="$anth_status_raw"
+fi
+if [[ "$anth_status" =~ ^[23][0-9][0-9]$ && -n "$anth_json" ]]; then
+  anth_indicator="$(printf '%s' "$anth_json" | python3 -c '
+import json, sys
+try:
+  print(json.load(sys.stdin).get("status", {}).get("indicator", "unknown"))
+except Exception:
+  print("unknown")
+' 2>/dev/null || echo unknown)"
+  [[ "$anth_indicator" == "none" ]] && anth_ok=true
+fi
+
 # --- Aggregate ---------------------------------------------------------------
 if [[ "$egress_ok" == "true" && "$dns_ok" == "true" && "$p21_ok" == "true" ]]; then
   overall="ok"
@@ -211,6 +242,7 @@ record="$(
   P21_OK="$p21_ok" P21_STATUS="$p21_status" P21_LATENCY="$p21_latency" P21_URL="$P21_PROBE_URL" \
   TLS_PRESENT="$tls_present" TLS_OK="$tls_ok" TLS_HOURS="$tls_hours" TLS_EXPIRES_AT="$tls_expires_at" \
   PROXY_PRESENT="$proxy_present" PROXY_OK="$proxy_ok" PROXY_STATUS="$proxy_status" PROXY_LATENCY="$proxy_latency" PROXY_CREDS="$proxy_creds_present" PROXY_URL="$PROXY_HEALTHZ_URL" \
+  ANTH_OK="$anth_ok" ANTH_INDICATOR="$anth_indicator" ANTH_STATUS="$anth_status" ANTH_LATENCY="$anth_latency" \
   python3 -c '
 import json, os
 e = os.environ
@@ -227,6 +259,7 @@ if b("TLS_PRESENT"):
   checks["tls_cert"] = {"ok": b("TLS_OK"), "hours_until_expiry": i("TLS_HOURS"), "expires_at": e["TLS_EXPIRES_AT"]}
 if b("PROXY_PRESENT"):
   checks["proxy_up"] = {"ok": b("PROXY_OK"), "http_status": i("PROXY_STATUS"), "latency_ms": i("PROXY_LATENCY"), "creds_present": b("PROXY_CREDS"), "url": e["PROXY_URL"]}
+checks["anthropic"] = {"ok": b("ANTH_OK"), "indicator": e["ANTH_INDICATOR"], "http_status": i("ANTH_STATUS"), "latency_ms": i("ANTH_LATENCY")}
 print(json.dumps({
   "checked_at": e["CHECKED_AT"],
   "overall":    e["OVERALL"],

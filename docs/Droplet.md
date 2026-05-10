@@ -132,6 +132,17 @@ The installer prints the health URL and a generated bearer token at the end. Cop
 
 To rotate the token: `rm /etc/olander-health.env` on the droplet and re-run `install.sh`.
 
+## Health log retention
+
+`healthcheck.sh` caps `log.jsonl` at ~90 days of 60-second checks (~32 MB on
+disk) so the `/status` page can render a 90-day per-day uptime bar. The
+`/health` endpoint reads the log on each request and emits a `daily` array
+alongside the existing `uptime` aggregates — no separate roll-up file.
+
+If you change the retention, also update `DAILY_DAYS` in `health-server.py`
+to match — they don't have to be identical, but the bar can only display as
+many days of real data as the log retains.
+
 ## Useful droplet commands
 
 ```

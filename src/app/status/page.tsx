@@ -1,11 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Wordmark } from "@/components/Wordmark";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { Logo } from "@/components/Logo";
 
 type ServiceState = "operational" | "degraded" | "down" | "unknown";
 
-type UptimeWindow = { checks: number; ok: number; pct: number | null };
+type Day = {
+  date: string;
+  pct: number | null;
+  checks?: number;
+};
 
 type Service = {
   id: string;
@@ -14,10 +19,8 @@ type Service = {
   state: ServiceState;
   message: string;
   checked_at: string | null;
-  details?: {
-    uptime?: Record<"1h" | "24h" | "7d", UptimeWindow>;
-    indicator?: string;
-  };
+  uptime_pct: number | null;
+  days: Day[];
 };
 
 type StatusPayload = {
@@ -25,7 +28,11 @@ type StatusPayload = {
   services: Service[];
 };
 
-const POLL_INTERVAL_MS = 30_000;
+// Match the droplet's healthcheck cadence — polling faster just gives us
+// the same data twice. The droplet's /health response is cached for 30s, so
+// 60s polling always hits fresh data.
+const POLL_INTERVAL_MS = 60_000;
+const BAR_COUNT = 90;
 
 export default function StatusPage() {
   const [data, setData] = useState<StatusPayload | null>(null);
@@ -58,160 +65,241 @@ export default function StatusPage() {
   const overall = deriveOverall(data?.services);
 
   return (
-    <div className="relative flex min-h-dvh flex-col overflow-hidden bg-brand-canvas">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-2/3"
-        style={{
-          background:
-            "radial-gradient(ellipse 80% 60% at 50% 0%, rgba(228, 217, 197, 0.55) 0%, transparent 70%)",
-        }}
-      />
-      <main className="relative mx-auto w-full max-w-3xl flex-1 px-6 py-12">
-        <header className="mb-10 flex flex-col items-center text-center">
-          <Wordmark variant="hero" />
-          <h1 className="mt-6 text-2xl font-semibold tracking-tight text-brand-charcoal">
-            Service status
-          </h1>
-          <p className="mt-2 text-sm text-brand-ink-soft">
-            Live health of the systems Olander Agents depends on.
-          </p>
+    <div className="min-h-dvh bg-brand-canvas">
+      <main className="mx-auto w-full max-w-4xl px-6 py-10 sm:py-14">
+        <header className="mb-12">
+          <Link href="/chat" className="flex items-center gap-3">
+            <Logo size="sm" />
+            <span className="text-lg font-medium text-brand-charcoal">
+              Agents Status
+            </span>
+          </Link>
         </header>
 
-        <div className="mb-6 flex items-center justify-between rounded-2xl border border-brand-charcoal/10 bg-white px-5 py-4">
-          <div className="flex items-center gap-3">
-            <StatusDot state={overall} />
-            <div>
-              <div className="text-sm font-semibold text-brand-charcoal">
-                {OVERALL_LABEL[overall]}
-              </div>
-              <div className="text-xs text-brand-ink-soft">
-                {data ? `Last refreshed ${formatRelative(data.fetched_at)}` : "Loading…"}
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={refresh}
-            disabled={loading}
-            className="rounded-full border border-brand-charcoal/15 bg-white px-3 py-1 text-xs text-brand-charcoal transition-colors hover:border-brand-charcoal/30 hover:bg-brand-sand/40 disabled:opacity-50"
-          >
-            Refresh
-          </button>
-        </div>
+        <section
+          className="mb-10 rounded-md px-6 py-5 text-white"
+          style={{ backgroundColor: BANNER_COLOR[overall] }}
+        >
+          <h1 className="text-xl font-semibold sm:text-2xl">
+            {OVERALL_LABEL[overall]}
+          </h1>
+        </section>
 
         {error && !data && (
-          <div className="rounded-lg border border-brand-red/30 bg-white px-4 py-3 text-sm text-brand-charcoal">
+          <div className="mb-6 rounded-md border border-brand-red/30 bg-white px-4 py-3 text-sm text-brand-charcoal">
             Could not load status: {error}
           </div>
         )}
 
-        <div className="space-y-4">
+        <div className="mb-3 flex justify-end text-xs text-brand-ink-soft">
+          Uptime over the past 90 days.
+        </div>
+
+        <section className="space-y-3">
           {data?.services.map((service) => (
             <ServiceCard key={service.id} service={service} />
           ))}
           {!data && loading && <SkeletonCard />}
-        </div>
+        </section>
 
-        <p className="mt-10 text-center text-xs text-brand-ink-soft">
-          Checks run every 60 seconds on the egress droplet. This page polls every 30 seconds.
-        </p>
       </main>
     </div>
   );
 }
 
 function ServiceCard({ service }: { service: Service }) {
-  const uptime = service.details?.uptime;
   return (
-    <article className="rounded-2xl border border-brand-charcoal/10 bg-white p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-base font-semibold text-brand-charcoal">{service.name}</h2>
-          <p className="mt-0.5 text-xs text-brand-ink-soft">{service.description}</p>
-        </div>
-        <StatusPill state={service.state} />
+    <article className="rounded-md border border-brand-charcoal/10 bg-white px-5 py-5 sm:px-6">
+      <div className="mb-3 flex items-center justify-between gap-4">
+        <h2 className="text-[15px] font-semibold text-brand-charcoal">
+          {service.name}
+        </h2>
+        <span
+          className="text-sm font-medium"
+          style={{ color: STATE_TEXT_COLOR[service.state] }}
+        >
+          {STATE_LABEL[service.state]}
+        </span>
       </div>
-
-      <p className="mt-3 text-sm text-brand-charcoal">{service.message}</p>
-
-      {uptime && (
-        <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-brand-charcoal/5 pt-4">
-          {(["1h", "24h", "7d"] as const).map((window) => (
-            <UptimeCell key={window} label={window} window={uptime[window]} />
-          ))}
-        </dl>
-      )}
-
-      {service.checked_at && (
-        <div className="mt-4 text-xs text-brand-ink-soft">
-          Last checked {formatRelative(service.checked_at)}
-        </div>
+      <UptimeBar service={service} />
+      {service.state !== "operational" && service.message && (
+        <p className="mt-3 text-sm text-brand-charcoal">{service.message}</p>
       )}
     </article>
   );
 }
 
-function UptimeCell({ label, window: w }: { label: string; window: UptimeWindow }) {
-  const display = w.pct === null ? "—" : `${w.pct.toFixed(w.pct === 100 ? 0 : 2)}%`;
+type Tooltip = {
+  x: number;
+  y: number;
+  date: string;
+  pct: number | null;
+};
+
+function UptimeBar({ service }: { service: Service }) {
+  const [tooltip, setTooltip] = useState<Tooltip | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Pad/truncate the days array to BAR_COUNT just in case.
+  const cells: Day[] =
+    service.days.length === BAR_COUNT
+      ? service.days
+      : Array.from(
+          { length: BAR_COUNT },
+          (_, i) =>
+            service.days[i + Math.max(0, service.days.length - BAR_COUNT)] ?? {
+              date: "",
+              pct: null,
+            },
+        );
+
+  const realCells = cells.filter((c) => c.pct !== null);
+  const uptimePct =
+    realCells.length > 0
+      ? realCells.reduce((acc, c) => acc + (c.pct ?? 0), 0) / realCells.length
+      : null;
+
+  const handleMove = (e: React.MouseEvent<SVGRectElement>, day: Day) => {
+    const cont = containerRef.current?.getBoundingClientRect();
+    if (!cont) return;
+    const rect = (e.target as SVGRectElement).getBoundingClientRect();
+    setTooltip({
+      x: rect.left - cont.left + rect.width / 2,
+      y: rect.top - cont.top,
+      date: day.date,
+      pct: day.pct,
+    });
+  };
+
   return (
-    <div>
-      <dt className="text-[11px] uppercase tracking-wide text-brand-ink-soft">Last {label}</dt>
-      <dd className="mt-1 text-lg font-semibold tabular-nums text-brand-charcoal">{display}</dd>
-      <div className="text-[11px] text-brand-ink-soft">
-        {w.ok}/{w.checks} checks
+    <div ref={containerRef} className="relative">
+      <svg
+        viewBox={`0 0 ${BAR_COUNT * 5 - 2} 34`}
+        preserveAspectRatio="none"
+        className="block h-[34px] w-full"
+        onMouseLeave={() => setTooltip(null)}
+      >
+        {cells.map((day, i) => (
+          <rect
+            key={`${day.date}-${i}`}
+            x={i * 5}
+            y={0}
+            width={3}
+            height={34}
+            fill={uptimeColor(day.pct)}
+            onMouseEnter={(e) => handleMove(e, day)}
+            onMouseMove={(e) => handleMove(e, day)}
+          />
+        ))}
+      </svg>
+      <div className="mt-2 grid grid-cols-3 items-center text-[11px] text-brand-ink-soft">
+        <span className="justify-self-start">90 days ago</span>
+        <span className="justify-self-center text-center">
+          {uptimePct === null
+            ? "— uptime"
+            : `${uptimePct.toFixed(uptimePct === 100 ? 0 : 2)} % uptime`}
+        </span>
+        <span className="justify-self-end">Today</span>
       </div>
+
+      {tooltip && (
+        <div
+          role="tooltip"
+          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-brand-charcoal/15 bg-white px-3 py-2 text-xs shadow-sm"
+          style={{ left: tooltip.x, top: tooltip.y - 6 }}
+        >
+          <div className="font-semibold text-brand-charcoal">
+            {formatTooltipDate(tooltip.date)}
+          </div>
+          <div className="mt-0.5 text-brand-ink-soft">
+            {tooltip.pct === null
+              ? "No data recorded for this day."
+              : tooltip.pct >= 100
+                ? "No downtime recorded on this day."
+                : `${tooltip.pct.toFixed(2)} % uptime`}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function SkeletonCard() {
   return (
-    <div className="rounded-2xl border border-brand-charcoal/10 bg-white p-5">
-      <div className="h-4 w-40 animate-pulse rounded bg-brand-canvas" />
-      <div className="mt-3 h-3 w-3/4 animate-pulse rounded bg-brand-canvas" />
-    </div>
+    <article className="rounded-md border border-brand-charcoal/10 bg-white px-5 py-5">
+      <div className="mb-3 h-4 w-40 animate-pulse rounded bg-brand-canvas" />
+      <div className="h-[34px] w-full animate-pulse rounded bg-brand-canvas" />
+    </article>
   );
 }
 
-function StatusDot({ state }: { state: ServiceState }) {
-  return (
-    <span
-      aria-hidden
-      className="inline-block h-2.5 w-2.5 rounded-full"
-      style={{ backgroundColor: STATE_COLOR[state] }}
-    />
-  );
+// Color stops picked to match status.claude.com:
+//   100%  -> #76ad2a (operational green)
+//   ~99%  -> #c3a92a (olive)
+//   ~97%  -> #f08030 (orange)
+//   <90%  -> #e04343 (red)
+//   null  -> #d3d3d3 (no data)
+function uptimeColor(pct: number | null): string {
+  if (pct === null || pct === undefined) return "#d3d3d3";
+  if (pct >= 100) return "#76ad2a";
+  if (pct >= 99) return interpolateHex("#76ad2a", "#c3a92a", (100 - pct) / 1);
+  if (pct >= 97) return interpolateHex("#c3a92a", "#f08030", (99 - pct) / 2);
+  if (pct >= 90) return interpolateHex("#f08030", "#e04343", (97 - pct) / 7);
+  return "#e04343";
 }
 
-function StatusPill({ state }: { state: ServiceState }) {
-  return (
-    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-brand-charcoal/15 bg-white px-2.5 py-1 text-xs text-brand-charcoal">
-      <StatusDot state={state} />
-      {STATE_LABEL[state]}
-    </span>
-  );
+function interpolateHex(a: string, b: string, t: number): string {
+  const clamp = Math.max(0, Math.min(1, t));
+  const ar = parseInt(a.slice(1, 3), 16);
+  const ag = parseInt(a.slice(3, 5), 16);
+  const ab = parseInt(a.slice(5, 7), 16);
+  const br = parseInt(b.slice(1, 3), 16);
+  const bg = parseInt(b.slice(3, 5), 16);
+  const bb = parseInt(b.slice(5, 7), 16);
+  const r = Math.round(ar + (br - ar) * clamp);
+  const g = Math.round(ag + (bg - ag) * clamp);
+  const bch = Math.round(ab + (bb - ab) * clamp);
+  return `#${[r, g, bch].map((n) => n.toString(16).padStart(2, "0")).join("")}`;
 }
 
-const STATE_COLOR: Record<ServiceState, string> = {
-  operational: "#16A34A",
-  degraded: "#D97706",
-  down: "#EB402E",
-  unknown: "#9CA3AF",
-};
+function formatTooltipDate(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso + "T00:00:00Z");
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
 
 const STATE_LABEL: Record<ServiceState, string> = {
   operational: "Operational",
   degraded: "Degraded",
-  down: "Down",
+  down: "Outage",
   unknown: "Unknown",
 };
 
+const STATE_TEXT_COLOR: Record<ServiceState, string> = {
+  operational: "#76ad2a",
+  degraded: "#d97706",
+  down: "#eb402e",
+  unknown: "#6b7280",
+};
+
+const BANNER_COLOR: Record<ServiceState, string> = {
+  operational: "#7fa744",
+  degraded: "#d97706",
+  down: "#eb402e",
+  unknown: "#6b7280",
+};
+
 const OVERALL_LABEL: Record<ServiceState, string> = {
-  operational: "All systems operational",
-  degraded: "Some systems degraded",
-  down: "Service disruption",
-  unknown: "Status unavailable",
+  operational: "All Systems Operational",
+  degraded: "Some Systems Degraded",
+  down: "Service Disruption",
+  unknown: "Status Unavailable",
 };
 
 function deriveOverall(services: Service[] | undefined): ServiceState {
@@ -222,13 +310,3 @@ function deriveOverall(services: Service[] | undefined): ServiceState {
   return "unknown";
 }
 
-function formatRelative(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return iso;
-  const diffSec = Math.round((Date.now() - then) / 1000);
-  if (diffSec < 5) return "just now";
-  if (diffSec < 60) return `${diffSec}s ago`;
-  if (diffSec < 3600) return `${Math.round(diffSec / 60)}m ago`;
-  if (diffSec < 86400) return `${Math.round(diffSec / 3600)}h ago`;
-  return `${Math.round(diffSec / 86400)}d ago`;
-}
