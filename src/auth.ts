@@ -30,8 +30,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     sessionsTable: sessions,
     verificationTokensTable: verificationTokens,
   }),
-  providers: [MicrosoftEntraID],
+  providers: [
+    MicrosoftEntraID({
+      // Force the Microsoft account picker every time. Without this, Microsoft
+      // SSO silently returns whichever account the browser is already signed
+      // into — which often isn't the right tenant — and the user lands on
+      // Auth.js's "Access Denied" page with no way to switch accounts.
+      authorization: {
+        params: { scope: "openid profile email User.Read", prompt: "select_account" },
+      },
+    }),
+  ],
   session: { strategy: "database" },
+  pages: { error: "/auth/error" },
   callbacks: {
     signIn({ profile }) {
       // Fail closed if the operator hasn't populated AUTH_ALLOWED_TENANT_IDS.
