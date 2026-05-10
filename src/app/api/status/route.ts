@@ -88,13 +88,12 @@ async function fetchDroplet(): Promise<ServiceCard> {
   const stateMap = { ok: "operational", degraded: "degraded", down: "down" } as const;
   const state: ServiceState = stateMap[latest.overall];
 
+  // Operational message stays generic; "awaiting P21 credentials" leaks
+  // ops-state to the unauthenticated /api/status. Failure labels are kept
+  // because they are symbolic ("P21 HTTP 500") and don't include raw IPs/URLs.
   let message: string;
-  const proxy = latest.checks.proxy_up;
   if (state === "operational") {
-    message =
-      proxy && proxy.ok && proxy.creds_present === false
-        ? "All checks passing — proxy awaiting P21 credentials"
-        : "All checks passing";
+    message = "All checks passing";
   } else {
     const failing: string[] = [];
     if (!latest.checks.egress_ip.ok) failing.push("egress IP mismatch");
@@ -104,10 +103,13 @@ async function fetchDroplet(): Promise<ServiceCard> {
       failing.push(code ? `P21 HTTP ${code}` : "P21 unreachable");
     }
     if (latest.checks.tls_cert && !latest.checks.tls_cert.ok) failing.push("TLS cert near expiry");
-    if (proxy && !proxy.ok) failing.push("Layer 2 proxy down");
+    if (latest.checks.proxy_up && !latest.checks.proxy_up.ok) failing.push("Layer 2 proxy down");
     message = failing.join(", ") || (state === "degraded" ? "Degraded" : "Down");
   }
 
+  // Don't expose latest.checks: it carries the egress IP, DNS-override target,
+  // P21 probe URL, loopback URL, and creds_present flag. The status UI only
+  // consumes state/message/checked_at/uptime — none of the raw checks.
   return {
     ...base,
     state,
@@ -115,7 +117,6 @@ async function fetchDroplet(): Promise<ServiceCard> {
     checked_at: latest.checked_at,
     details: {
       uptime: payload.uptime,
-      checks: latest.checks,
     },
   };
 }
