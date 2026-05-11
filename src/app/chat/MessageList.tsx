@@ -61,14 +61,18 @@ export function MessageList({ messages, status, onRegenerate, onSelectSuggestion
           {isEmpty ? (
             <EmptyState onSelectSuggestion={onSelectSuggestion} />
           ) : (
-            messages.map((m, i) => (
-              <Bubble
-                key={m.id}
-                message={m}
-                showActions={i === lastAssistantIndex && status === "ready"}
-                onRegenerate={onRegenerate}
-              />
-            ))
+            messages.map((m, i) => {
+              const isLast = i === lastAssistantIndex;
+              return (
+                <Bubble
+                  key={m.id}
+                  message={m}
+                  showActions={isLast && status === "ready"}
+                  inFlight={isLast && status !== "ready"}
+                  onRegenerate={onRegenerate}
+                />
+              );
+            })
           )}
           {status === "submitted" && (
             // Only show the standalone typing indicator before the assistant
@@ -97,10 +101,12 @@ export function MessageList({ messages, status, onRegenerate, onSelectSuggestion
 function Bubble({
   message,
   showActions,
+  inFlight,
   onRegenerate,
 }: {
   message: UIMessage;
   showActions: boolean;
+  inFlight: boolean;
   onRegenerate: () => void;
 }) {
   const isUser = message.role === "user";
@@ -163,15 +169,33 @@ function Bubble({
     )
     .filter((s): s is string => Boolean(s));
 
+  // Once the answer is finalized (not streaming), tuck the intermediate
+  // reasoning + tool calls behind a disclosure and surface just the final
+  // text bubble. While streaming, show everything inline so the rep can
+  // watch the assistant work.
+  const lastTextGroupIndex = (() => {
+    for (let i = groups.length - 1; i >= 0; i--) {
+      if (groups[i].kind === "text") return i;
+    }
+    return -1;
+  })();
+  const shouldCollapse =
+    !inFlight && lastTextGroupIndex > 0 && hasText;
+  const stepGroups = shouldCollapse ? groups.slice(0, lastTextGroupIndex) : [];
+  const inlineGroups = shouldCollapse ? groups.slice(lastTextGroupIndex) : groups;
+
   return (
     <div className="group flex items-start gap-3 animate-message-in">
       <Avatar />
-      <div className="flex min-w-0 flex-1 flex-col gap-3">
-        {groups.map((g, i) =>
+      <div className="flex min-w-0 max-w-[90%] flex-1 flex-col gap-3">
+        {shouldCollapse && stepGroups.length > 0 && (
+          <StepsDisclosure groups={stepGroups} />
+        )}
+        {inlineGroups.map((g, i) =>
           g.kind === "text" ? (
             <div
               key={`text-${i}`}
-              className="max-w-[90%] rounded-2xl border border-brand-charcoal/10 bg-white px-4 py-3 leading-relaxed text-brand-charcoal"
+              className="rounded-2xl border border-brand-charcoal/10 bg-white px-4 py-3 leading-relaxed text-brand-charcoal"
             >
               <AssistantContent text={g.text} />
             </div>
@@ -180,7 +204,7 @@ function Bubble({
           ),
         )}
         {citations.length > 0 && hasText && (
-          <div className="max-w-[90%] text-[11px] text-brand-ink-soft">
+          <div className="text-[11px] text-brand-ink-soft">
             Data: {citations.join(", ")}
           </div>
         )}
@@ -189,6 +213,71 @@ function Bubble({
         )}
       </div>
     </div>
+  );
+}
+
+function StepsDisclosure({
+  groups,
+}: {
+  groups: Array<
+    | { kind: "text"; text: string }
+    | { kind: "tool"; part: ToolPartLike; key: string }
+  >;
+}) {
+  const [open, setOpen] = useState(false);
+  const toolCount = groups.filter((g) => g.kind === "tool").length;
+  const label =
+    toolCount > 0
+      ? `${toolCount} ${toolCount === 1 ? "step" : "steps"}`
+      : "Reasoning";
+
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="inline-flex w-fit items-center gap-1.5 rounded-full border border-brand-charcoal/15 bg-white px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-brand-ink-soft transition-colors hover:border-brand-charcoal/30 hover:text-brand-charcoal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2 focus-visible:ring-offset-brand-canvas"
+      >
+        <DisclosureChevron open={open} />
+        <span>{open ? "Hide" : "Show"} {label}</span>
+      </button>
+      {open && (
+        <div className="flex flex-col gap-2 border-l-2 border-brand-charcoal/10 pl-3">
+          {groups.map((g, i) =>
+            g.kind === "text" ? (
+              <div
+                key={`step-text-${i}`}
+                className="rounded-2xl border border-brand-charcoal/10 bg-white px-4 py-3 text-sm leading-relaxed text-brand-charcoal"
+              >
+                <AssistantContent text={g.text} />
+              </div>
+            ) : (
+              <ToolCallCard key={g.key} part={g.part} />
+            ),
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DisclosureChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="10"
+      height="10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={`transition-transform ${open ? "rotate-90" : ""}`}
+      aria-hidden
+    >
+      <path d="M6 3l5 5-5 5" />
+    </svg>
   );
 }
 
