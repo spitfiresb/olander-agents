@@ -3,7 +3,7 @@
 // imports so the tests can exercise the logic without booting the entire
 // next-auth runtime.
 
-export const ALLOWED_DOMAINS = ["olander.com"];
+export const ALLOWED_DOMAINS = ["olander.com", "uoregon.edu"];
 
 export function isAllowedDomain(
   email: string | null | undefined,

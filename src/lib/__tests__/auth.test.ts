@@ -8,6 +8,10 @@ describe("isAllowedDomain", () => {
     expect(isAllowedDomain("rep@example.com")).toBe(true);
   });
 
+  test("accepts uoregon.edu", () => {
+    expect(isAllowedDomain("dev@uoregon.edu")).toBe(true);
+  });
+
   test("rejects unknown domains", () => {
     expect(isAllowedDomain("rep@example.com")).toBe(false);
     expect(isAllowedDomain("rep@example.co")).toBe(false);
