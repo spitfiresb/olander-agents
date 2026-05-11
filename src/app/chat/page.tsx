@@ -6,5 +6,5 @@ export default async function ChatPage() {
   const session = await auth();
   if (!session?.user) redirect("/");
 
-  return <ChatShell />;
+  return <ChatShell isAdmin={session.user.role === "admin"} />;
 }

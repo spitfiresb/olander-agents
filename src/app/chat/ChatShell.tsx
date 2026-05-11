@@ -15,9 +15,10 @@ import { signOutAction } from "./actions";
 type Props = {
   initialConversationId?: string;
   initialMessages?: UIMessage[];
+  isAdmin?: boolean;
 };
 
-export function ChatShell({ initialConversationId, initialMessages }: Props) {
+export function ChatShell({ initialConversationId, initialMessages, isAdmin }: Props) {
   const router = useRouter();
   // Lives outside React state so the transport's body callback (which fires
   // outside the React render path) can read the current id without a
@@ -204,7 +205,7 @@ export function ChatShell({ initialConversationId, initialMessages }: Props) {
           >
             <PlusIcon />
           </button>
-          <AccountMenu variant="charcoal" />
+          <AccountMenu variant="charcoal" isAdmin={isAdmin} />
         </header>
 
         {/* Desktop top strip with status pill (hidden under lg) */}
@@ -213,7 +214,7 @@ export function ChatShell({ initialConversationId, initialMessages }: Props) {
             Demo mode — sample data only
           </span>
           <div className="absolute inset-y-0 right-4 flex items-center">
-            <AccountMenu variant="canvas" />
+            <AccountMenu variant="canvas" isAdmin={isAdmin} />
           </div>
         </header>
 
@@ -239,7 +240,13 @@ export function ChatShell({ initialConversationId, initialMessages }: Props) {
   );
 }
 
-function AccountMenu({ variant }: { variant: "canvas" | "charcoal" }) {
+function AccountMenu({
+  variant,
+  isAdmin,
+}: {
+  variant: "canvas" | "charcoal";
+  isAdmin?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -284,6 +291,19 @@ function AccountMenu({ variant }: { variant: "canvas" | "charcoal" }) {
           role="menu"
           className="animate-menu-in absolute right-0 top-full z-20 mt-2 min-w-[160px] overflow-hidden rounded-2xl border border-brand-charcoal/10 bg-white py-1 shadow-md"
         >
+          {isAdmin && (
+            <>
+              <Link
+                href="/admin"
+                role="menuitem"
+                onClick={() => setOpen(false)}
+                className="block w-full px-3 py-2 text-left text-sm text-brand-charcoal transition-colors hover:bg-brand-sand/40 focus-visible:bg-brand-sand/40 focus-visible:outline-none"
+              >
+                Admin panel
+              </Link>
+              <div className="my-1 h-px bg-brand-charcoal/10" />
+            </>
+          )}
           <form action={signOutAction}>
             <button
               type="submit"

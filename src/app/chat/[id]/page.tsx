@@ -23,5 +23,11 @@ export default async function ConversationPage({ params }: Props) {
     parts: row.parts as UIMessage["parts"],
   }));
 
-  return <ChatShell initialConversationId={id} initialMessages={initialMessages} />;
+  return (
+    <ChatShell
+      initialConversationId={id}
+      initialMessages={initialMessages}
+      isAdmin={session.user.role === "admin"}
+    />
+  );
 }
