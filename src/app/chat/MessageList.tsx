@@ -179,19 +179,21 @@ function Bubble({
     }
     return -1;
   })();
-  const shouldCollapse =
-    !inFlight && lastTextGroupIndex > 0 && hasText;
-  const stepGroups = shouldCollapse ? groups.slice(0, lastTextGroupIndex) : [];
-  const inlineGroups = shouldCollapse ? groups.slice(lastTextGroupIndex) : groups;
+  const hasStepGroups = lastTextGroupIndex > 0 && hasText;
+  const stepGroups = hasStepGroups ? groups.slice(0, lastTextGroupIndex) : [];
+  const finalGroups = hasStepGroups ? groups.slice(lastTextGroupIndex) : groups;
 
   return (
     <div className="group flex items-start gap-3 animate-message-in">
       <Avatar />
       <div className="flex min-w-0 max-w-[90%] flex-1 flex-col gap-3">
-        {shouldCollapse && stepGroups.length > 0 && (
-          <StepsDisclosure groups={stepGroups} />
+        {hasStepGroups && (
+          <StepsDisclosure
+            groups={stepGroups}
+            inFlight={inFlight}
+          />
         )}
-        {inlineGroups.map((g, i) =>
+        {finalGroups.map((g, i) =>
           g.kind === "text" ? (
             <div
               key={`text-${i}`}
@@ -218,13 +220,21 @@ function Bubble({
 
 function StepsDisclosure({
   groups,
+  inFlight,
 }: {
   groups: Array<
     | { kind: "text"; text: string }
     | { kind: "tool"; part: ToolPartLike; key: string }
   >;
+  inFlight: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  // userOpen tracks intent from the disclosure button; while streaming we
+  // force the panel open regardless so the rep can watch progress. When
+  // inFlight flips to false, stepsOpen flips to userOpen (false by default)
+  // and the grid-template-rows transition animates the collapse smoothly.
+  const [userOpen, setUserOpen] = useState(false);
+  const stepsOpen = inFlight || userOpen;
+
   const toolCount = groups.filter((g) => g.kind === "tool").length;
   const label =
     toolCount > 0
@@ -232,32 +242,40 @@ function StepsDisclosure({
       : "Reasoning";
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="inline-flex w-fit items-center gap-1.5 rounded-full border border-brand-charcoal/15 bg-white px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-brand-ink-soft transition-colors hover:border-brand-charcoal/30 hover:text-brand-charcoal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2 focus-visible:ring-offset-brand-canvas"
+        onClick={() => setUserOpen((v) => !v)}
+        aria-expanded={stepsOpen}
+        className={`inline-flex w-fit items-center gap-1.5 rounded-full border border-brand-charcoal/15 bg-white px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-brand-ink-soft transition-all duration-300 hover:border-brand-charcoal/30 hover:text-brand-charcoal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2 focus-visible:ring-offset-brand-canvas ${
+          inFlight ? "pointer-events-none opacity-0" : "opacity-100"
+        }`}
       >
-        <DisclosureChevron open={open} />
-        <span>{open ? "Hide" : "Show"} {label}</span>
+        <DisclosureChevron open={stepsOpen} />
+        <span>{userOpen ? "Hide" : "Show"} {label}</span>
       </button>
-      {open && (
-        <div className="flex flex-col gap-2 border-l-2 border-brand-charcoal/10 pl-3">
-          {groups.map((g, i) =>
-            g.kind === "text" ? (
-              <div
-                key={`step-text-${i}`}
-                className="rounded-2xl border border-brand-charcoal/10 bg-white px-4 py-3 text-sm leading-relaxed text-brand-charcoal"
-              >
-                <AssistantContent text={g.text} />
-              </div>
-            ) : (
-              <ToolCallCard key={g.key} part={g.part} />
-            ),
-          )}
+      <div
+        className={`grid transition-[grid-template-rows] duration-300 ease-out ${
+          stepsOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        }`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="flex flex-col gap-2 border-l-2 border-brand-charcoal/10 pl-3 pt-2">
+            {groups.map((g, i) =>
+              g.kind === "text" ? (
+                <div
+                  key={`step-text-${i}`}
+                  className="rounded-2xl border border-brand-charcoal/10 bg-white px-4 py-3 text-sm leading-relaxed text-brand-charcoal"
+                >
+                  <AssistantContent text={g.text} />
+                </div>
+              ) : (
+                <ToolCallCard key={g.key} part={g.part} />
+              ),
+            )}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
