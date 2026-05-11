@@ -156,11 +156,18 @@ fi
 # P21_USERNAME, P21_PASSWORD) are appended by hand once the provider contact provides them —
 # the proxy reads their presence to flip /proxy/healthz creds_present=true.
 log "ensuring /etc/olander-proxy.env (root-owned, 0600)"
+P21_BASE_URL_DEFAULT="${P21_BASE_URL:-https://<p21-host>}"
 if [[ ! -f /etc/olander-proxy.env ]]; then
   PROXY_TOKEN_VAL="$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | cut -c1-40)"
   ( umask 077
-    printf 'OLANDER_PROXY_TOKEN=%s\nPORT=%s\nHOST=127.0.0.1\n' \
-      "$PROXY_TOKEN_VAL" "$PROXY_PORT" > /etc/olander-proxy.env
+    {
+      printf 'OLANDER_PROXY_TOKEN=%s\n' "$PROXY_TOKEN_VAL"
+      printf 'PORT=%s\n' "$PROXY_PORT"
+      printf 'HOST=127.0.0.1\n'
+      printf 'P21_BASE_URL=%s\n' "$P21_BASE_URL_DEFAULT"
+      printf '# Append the P21 credentials below by hand on the droplet (do not commit):\n'
+      printf '# P21_USERNAME=...\n# P21_PASSWORD=...\n# (or, when the provider contact provisions one: P21_CONSUMER_KEY=...)\n'
+    } > /etc/olander-proxy.env
   )
   chmod 0600 /etc/olander-proxy.env
   chown root:root /etc/olander-proxy.env
@@ -170,7 +177,18 @@ else
   if ! grep -qE '^HOST=' /etc/olander-proxy.env; then
     printf 'HOST=127.0.0.1\n' >> /etc/olander-proxy.env
   fi
+  if ! grep -qE '^P21_BASE_URL=' /etc/olander-proxy.env; then
+    printf 'P21_BASE_URL=%s\n' "$P21_BASE_URL_DEFAULT" >> /etc/olander-proxy.env
+  fi
   log "  /etc/olander-proxy.env preserved"
+fi
+
+# Warn (don't fail) if P21 credentials are missing. The proxy boots fine
+# without them; /proxy/healthz reports creds_present:false until they're added.
+if ! grep -qE '^(P21_USERNAME|P21_CONSUMER_KEY)=' /etc/olander-proxy.env; then
+  warn "no P21_USERNAME / P21_CONSUMER_KEY in /etc/olander-proxy.env yet."
+  warn "  Proxy will respond 503 credentials_pending to every /proxy/views and /proxy/entity call until you add them."
+  warn "  When ready: append the values, then run 'systemctl restart olander-proxy.service'."
 fi
 
 # --- systemd units -----------------------------------------------------------
@@ -288,7 +306,7 @@ Set these in the Next.js app environment:
   DROPLET_PROXY_TOKEN=${PROXY_TOKEN_VAL}
 
 When P21 credentials arrive, append to /etc/olander-proxy.env (root, 0600):
-  P21_USERNAME=...   (or P21_TOKEN=...)
+  P21_USERNAME=...   (or, preferred, P21_CONSUMER_KEY=...)
   P21_PASSWORD=...
 Then: systemctl restart olander-proxy.service
 

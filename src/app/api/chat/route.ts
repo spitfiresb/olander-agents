@@ -72,7 +72,7 @@ export async function POST(req: Request) {
     system: SYSTEM_PROMPT,
     messages: await convertToModelMessages(parsed.data.messages as UIMessage[]),
     tools,
-    stopWhen: stepCountIs(3),
+    stopWhen: stepCountIs(5),
     abortSignal: req.signal,
     onError: ({ error }) => {
       console.error("[chat] stream error:", error);
