@@ -17,6 +17,7 @@ type Day = {
   date: string; // YYYY-MM-DD (UTC)
   pct: number | null; // null = no data recorded that day
   checks?: number;
+  ok?: number; // passing checks; (checks - ok) = ~minutes of downtime (1 check / 60s)
 };
 
 type Window = { checks: number; ok: number; pct: number | null };
@@ -110,7 +111,7 @@ function buildDays(payload: DropletPayload | null): Day[] {
   if (Array.isArray(payload.daily)) {
     for (const d of payload.daily) {
       const i = byDate.get(d.date);
-      if (i !== undefined) days[i] = { ...days[i], pct: d.pct, checks: d.checks };
+      if (i !== undefined) days[i] = { ...days[i], pct: d.pct, checks: d.checks, ok: d.ok };
     }
     return days;
   }
@@ -137,7 +138,7 @@ function buildAnthropicDays(payload: DropletPayload | null): Day[] {
   const byDate = new Map(days.map((d, i) => [d.date, i]));
   for (const d of payload.anthropic.daily) {
     const i = byDate.get(d.date);
-    if (i !== undefined) days[i] = { ...days[i], pct: d.pct, checks: d.checks };
+    if (i !== undefined) days[i] = { ...days[i], pct: d.pct, checks: d.checks, ok: d.ok };
   }
   return days;
 }
@@ -148,7 +149,7 @@ function buildP21ApiDays(payload: DropletPayload | null): Day[] {
   const byDate = new Map(days.map((d, i) => [d.date, i]));
   for (const d of payload.p21_api.daily) {
     const i = byDate.get(d.date);
-    if (i !== undefined) days[i] = { ...days[i], pct: d.pct, checks: d.checks };
+    if (i !== undefined) days[i] = { ...days[i], pct: d.pct, checks: d.checks, ok: d.ok };
   }
   return days;
 }

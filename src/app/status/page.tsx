@@ -10,6 +10,7 @@ type Day = {
   date: string;
   pct: number | null;
   checks?: number;
+  ok?: number;
 };
 
 type Service = {
@@ -111,9 +112,12 @@ function ServiceCard({ service }: { service: Service }) {
   return (
     <article className="rounded-md border border-brand-charcoal/10 bg-white px-5 py-5 sm:px-6">
       <div className="mb-3 flex items-center justify-between gap-4">
-        <h2 className="text-[15px] font-semibold text-brand-charcoal">
-          {service.name}
-        </h2>
+        <div className="flex items-center gap-1.5">
+          <h2 className="text-[15px] font-semibold text-brand-charcoal">
+            {service.name}
+          </h2>
+          <InfoButton description={service.description} />
+        </div>
         <span
           className="text-sm font-medium"
           style={{ color: STATE_TEXT_COLOR[service.state] }}
@@ -129,11 +133,68 @@ function ServiceCard({ service }: { service: Service }) {
   );
 }
 
+function InfoButton({ description }: { description: string }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <span ref={wrapRef} className="relative inline-flex">
+      <button
+        type="button"
+        aria-label="What does this check?"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex h-4 w-4 items-center justify-center rounded-full text-brand-ink-soft transition-colors hover:text-brand-charcoal focus-visible:text-brand-charcoal focus-visible:outline-none"
+      >
+        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" aria-hidden="true">
+          <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1" />
+          <text
+            x="8"
+            y="11.5"
+            textAnchor="middle"
+            fontSize="9"
+            fontWeight="600"
+            fill="currentColor"
+          >
+            ?
+          </text>
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="tooltip"
+          className="absolute left-full top-1/2 z-10 ml-2 w-max max-w-xs -translate-y-1/2 whitespace-normal rounded-md border border-brand-charcoal/15 bg-white px-3 py-2 text-xs text-brand-ink-soft shadow-sm"
+        >
+          {description}
+        </div>
+      )}
+    </span>
+  );
+}
+
 type Tooltip = {
   x: number;
   y: number;
   date: string;
   pct: number | null;
+  checks?: number;
+  ok?: number;
 };
 
 function UptimeBar({ service }: { service: Service }) {
@@ -168,6 +229,8 @@ function UptimeBar({ service }: { service: Service }) {
       y: rect.top - cont.top,
       date: day.date,
       pct: day.pct,
+      checks: day.checks,
+      ok: day.ok,
     });
   };
 
@@ -211,15 +274,69 @@ function UptimeBar({ service }: { service: Service }) {
           <div className="font-semibold text-brand-charcoal">
             {formatTooltipDate(tooltip.date)}
           </div>
-          <div className="mt-0.5 text-brand-ink-soft">
-            {tooltip.pct === null
-              ? "No data recorded for this day."
-              : tooltip.pct >= 100
-                ? "No downtime recorded on this day."
-                : `${tooltip.pct.toFixed(2)} % uptime`}
-          </div>
+          {tooltip.pct === null ? (
+            <div className="mt-0.5 text-brand-ink-soft">No data recorded for this day.</div>
+          ) : tooltip.pct >= 100 ? (
+            <div className="mt-0.5 text-brand-ink-soft">No downtime recorded on this day.</div>
+          ) : tooltip.checks != null &&
+            tooltip.ok != null &&
+            tooltip.checks > tooltip.ok ? (
+            <OutageCard
+              minutes={tooltip.checks - tooltip.ok}
+              severity={tooltip.pct < 90 ? "major" : "partial"}
+            />
+          ) : (
+            <div className="mt-0.5 text-brand-ink-soft">{tooltip.pct.toFixed(2)} % uptime</div>
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+function OutageCard({
+  minutes,
+  severity,
+}: {
+  minutes: number;
+  severity: "partial" | "major";
+}) {
+  const hrs = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  const isMajor = severity === "major";
+  const palette = isMajor
+    ? { bg: "bg-red-50", border: "border-red-200", icon: "text-red-500" }
+    : { bg: "bg-amber-50", border: "border-amber-200", icon: "text-amber-500" };
+  const label = isMajor ? "Major outage" : "Partial outage";
+  return (
+    <div
+      className={`mt-2 flex items-center gap-2 rounded-md border ${palette.border} ${palette.bg} px-2.5 py-1.5`}
+    >
+      <span className={`flex h-4 w-4 items-center justify-center ${palette.icon}`} aria-hidden>
+        {isMajor ? (
+          <svg viewBox="0 0 14 14" className="h-3.5 w-3.5">
+            <circle cx="7" cy="7" r="6.5" fill="currentColor" />
+            <path
+              d="M4.6 4.6 L9.4 9.4 M9.4 4.6 L4.6 9.4"
+              stroke="white"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+            />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 14 14" className="h-3.5 w-3.5">
+            <path d="M7 1 L13.2 12 L0.8 12 Z" fill="currentColor" />
+            <rect x="6.45" y="5" width="1.1" height="3.6" fill="white" rx="0.3" />
+            <circle cx="7" cy="10.2" r="0.65" fill="white" />
+          </svg>
+        )}
+      </span>
+      <span className="font-medium text-brand-charcoal">{label}</span>
+      <span className="ml-2 text-brand-ink-soft tabular-nums">
+        {hrs} {hrs === 1 ? "hr" : "hrs"}
+        {"  "}
+        {mins} {mins === 1 ? "min" : "mins"}
+      </span>
     </div>
   );
 }
