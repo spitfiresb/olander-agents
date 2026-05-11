@@ -105,24 +105,54 @@ function Bubble({
 }) {
   const isUser = message.role === "user";
 
-  const textParts = message.parts.filter(
-    (p): p is { type: "text"; text: string } =>
-      typeof p === "object" && p !== null && "type" in p && p.type === "text",
-  );
-  const text = textParts.map((p) => p.text).join("\n\n");
+  type TextPart = { type: "text"; text: string };
+  const isTextPart = (p: unknown): p is TextPart =>
+    typeof p === "object" && p !== null && "type" in p &&
+    (p as { type: string }).type === "text";
 
   if (isUser) {
+    const userText = message.parts
+      .filter(isTextPart)
+      .map((p) => p.text)
+      .join("\n\n");
     return (
       <div className="flex justify-end animate-message-in">
         <div className="max-w-[75%] whitespace-pre-wrap rounded-2xl bg-brand-sand px-4 py-2.5 leading-relaxed text-brand-charcoal">
-          {text}
+          {userText}
         </div>
       </div>
     );
   }
 
-  const toolParts: ToolPartLike[] = message.parts.filter(isToolPart);
-  const hasText = text.length > 0;
+  // Walk parts in order, grouping consecutive text into one bubble so the
+  // UI mirrors how the assistant actually thought: text → tool → text → tool.
+  type Group =
+    | { kind: "text"; text: string }
+    | { kind: "tool"; part: ToolPartLike; key: string };
+  const groups: Group[] = [];
+  for (let i = 0; i < message.parts.length; i++) {
+    const part = message.parts[i];
+    if (isTextPart(part)) {
+      const last = groups[groups.length - 1];
+      if (last && last.kind === "text") {
+        last.text += part.text;
+      } else if (part.text.length > 0) {
+        groups.push({ kind: "text", text: part.text });
+      }
+    } else if (isToolPart(part)) {
+      groups.push({ kind: "tool", part, key: part.toolCallId ?? `t${i}` });
+    }
+  }
+
+  const allText = groups
+    .filter((g): g is Extract<Group, { kind: "text" }> => g.kind === "text")
+    .map((g) => g.text)
+    .join("\n\n");
+  const hasText = allText.length > 0;
+
+  const toolParts: ToolPartLike[] = groups
+    .filter((g): g is Extract<Group, { kind: "tool" }> => g.kind === "tool")
+    .map((g) => g.part);
   const citations = toolParts
     .map((part) =>
       summarizeToolUsageForCitation(
@@ -137,17 +167,17 @@ function Bubble({
     <div className="group flex items-start gap-3 animate-message-in">
       <Avatar />
       <div className="flex min-w-0 flex-1 flex-col gap-3">
-        {toolParts.length > 0 && (
-          <div className="flex flex-col gap-2">
-            {toolParts.map((p, i) => (
-              <ToolCallCard key={p.toolCallId ?? i} part={p} />
-            ))}
-          </div>
-        )}
-        {hasText && (
-          <div className="max-w-[90%] rounded-2xl border border-brand-charcoal/10 bg-white px-4 py-3 leading-relaxed text-brand-charcoal">
-            <AssistantContent text={text} />
-          </div>
+        {groups.map((g, i) =>
+          g.kind === "text" ? (
+            <div
+              key={`text-${i}`}
+              className="max-w-[90%] rounded-2xl border border-brand-charcoal/10 bg-white px-4 py-3 leading-relaxed text-brand-charcoal"
+            >
+              <AssistantContent text={g.text} />
+            </div>
+          ) : (
+            <ToolCallCard key={g.key} part={g.part} />
+          ),
         )}
         {citations.length > 0 && hasText && (
           <div className="max-w-[90%] text-[11px] text-brand-ink-soft">
@@ -155,7 +185,7 @@ function Bubble({
           </div>
         )}
         {showActions && hasText && (
-          <MessageActions text={text} onRegenerate={onRegenerate} />
+          <MessageActions text={allText} onRegenerate={onRegenerate} />
         )}
       </div>
     </div>
