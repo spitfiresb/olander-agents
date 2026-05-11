@@ -359,9 +359,13 @@ function SkeletonCard() {
 function uptimeColor(pct: number | null): string {
   if (pct === null || pct === undefined) return "#d3d3d3";
   if (pct >= 100) return "#76ad2a";
-  if (pct >= 99) return interpolateHex("#76ad2a", "#c3a92a", (100 - pct) / 1);
-  if (pct >= 97) return interpolateHex("#c3a92a", "#f08030", (99 - pct) / 2);
-  if (pct >= 90) return interpolateHex("#f08030", "#e04343", (97 - pct) / 7);
+  // Sqrt curve within each band: any downtime jumps the cell visibly off pure
+  // green (a 2-min dip → ~40% toward olive instead of 15%) while severe drops
+  // still reach the band endpoint. Band edges remain continuous.
+  const curve = (t: number) => Math.sqrt(Math.max(0, Math.min(1, t)));
+  if (pct >= 99) return interpolateHex("#76ad2a", "#c3a92a", curve((100 - pct) / 1));
+  if (pct >= 97) return interpolateHex("#c3a92a", "#f08030", curve((99 - pct) / 2));
+  if (pct >= 90) return interpolateHex("#f08030", "#e04343", curve((97 - pct) / 7));
   return "#e04343";
 }
 
