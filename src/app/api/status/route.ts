@@ -28,6 +28,14 @@ type AnthropicCheck = {
   latency_ms?: number;
 };
 
+type P21ApiCheck = {
+  ok: boolean;
+  token_ok?: boolean;
+  view_query_ok?: boolean;
+  last_error?: string;
+  creds_present?: boolean;
+};
+
 type DropletPayload = {
   latest: null | {
     checked_at: string;
@@ -39,11 +47,16 @@ type DropletPayload = {
       tls_cert?: DropletCheckResult & { hours_until_expiry?: number; expires_at?: string };
       proxy_up?: DropletCheckResult & { creds_present?: boolean };
       anthropic?: AnthropicCheck;
+      p21_api?: P21ApiCheck;
     };
   };
   uptime: Record<"1h" | "24h" | "7d", Window>;
   daily?: Day[];
   anthropic?: {
+    uptime: Record<"1h" | "24h" | "7d", Window>;
+    daily: Day[];
+  };
+  p21_api?: {
     uptime: Record<"1h" | "24h" | "7d", Window>;
     daily: Day[];
   };
@@ -123,6 +136,17 @@ function buildAnthropicDays(payload: DropletPayload | null): Day[] {
   if (!payload?.anthropic?.daily) return days;
   const byDate = new Map(days.map((d, i) => [d.date, i]));
   for (const d of payload.anthropic.daily) {
+    const i = byDate.get(d.date);
+    if (i !== undefined) days[i] = { ...days[i], pct: d.pct, checks: d.checks };
+  }
+  return days;
+}
+
+function buildP21ApiDays(payload: DropletPayload | null): Day[] {
+  const days = emptyDays();
+  if (!payload?.p21_api?.daily) return days;
+  const byDate = new Map(days.map((d, i) => [d.date, i]));
+  for (const d of payload.p21_api.daily) {
     const i = byDate.get(d.date);
     if (i !== undefined) days[i] = { ...days[i], pct: d.pct, checks: d.checks };
   }
@@ -272,6 +296,70 @@ async function buildAnthropicService(
   }
 }
 
+function buildP21ApiService(
+  payload: DropletPayload | null,
+  error: string | null,
+): Service {
+  const base: Service = {
+    id: "p21_api",
+    name: "P21 API",
+    description: "Token mint and Data Services view query",
+    state: "unknown",
+    message: "Not configured",
+    checked_at: null,
+    uptime_pct: null,
+    days: emptyDays(),
+  };
+  if (error) {
+    return { ...base, state: "down", message: error };
+  }
+  if (!payload) return base;
+  const latest = payload.latest;
+  if (!latest) {
+    return { ...base, message: "No checks recorded yet" };
+  }
+  const api = latest.checks.p21_api;
+  // Pre-upgrade droplet: field absent. Render unknown rather than down so the
+  // deploy window (Vercel ahead of droplet) doesn't false-alarm.
+  if (!api) {
+    return { ...base, message: "Awaiting upgraded droplet", checked_at: latest.checked_at };
+  }
+  // Creds absent: probe didn't run. Surface as unknown, not down.
+  if (api.creds_present === false) {
+    return {
+      ...base,
+      message: "P21 credentials not configured",
+      checked_at: latest.checked_at,
+    };
+  }
+
+  const days = buildP21ApiDays(payload);
+  let state: ServiceState;
+  let message: string;
+  if (api.token_ok && api.view_query_ok) {
+    state = "operational";
+    message = "Token mint and view query OK";
+  } else if (!api.token_ok) {
+    state = "degraded";
+    message = api.last_error
+      ? `Token mint failed: ${api.last_error}`
+      : "Token mint failed";
+  } else {
+    state = "degraded";
+    message = api.last_error
+      ? `View query failed: ${api.last_error}`
+      : "View query failed";
+  }
+  return {
+    ...base,
+    state,
+    message,
+    checked_at: latest.checked_at,
+    uptime_pct: computeWindowPct(days),
+    days,
+  };
+}
+
 function computeWindowPct(days: Day[]): number | null {
   const real = days.filter((d) => d.pct !== null);
   if (real.length === 0) return null;
@@ -282,9 +370,10 @@ function computeWindowPct(days: Day[]): number | null {
 export async function GET() {
   const { payload, error } = await fetchDropletPayload();
   const p21 = buildP21Service(payload, error);
+  const p21Api = buildP21ApiService(payload, error);
   const anthropic = await buildAnthropicService(payload);
   return NextResponse.json(
-    { fetched_at: new Date().toISOString(), services: [p21, anthropic] },
+    { fetched_at: new Date().toISOString(), services: [p21, p21Api, anthropic] },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

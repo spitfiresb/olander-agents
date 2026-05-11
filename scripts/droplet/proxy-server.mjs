@@ -171,6 +171,19 @@ const REFRESH_AT_RATIO = 0.9;
 let cachedToken = null;        // { token, mintedAt: ms, expiresAt: ms }
 let inflightMint = null;       // Promise<{token,...}>
 
+// Active P21 API probe. Token mint + 1-row view query against p21_view_inv_mast.
+// Lazy: only runs when /healthz is called and the cached result is stale. The
+// bash healthcheck timer drives /healthz once per 60s, so the cadence aligns
+// naturally with PROBE_TTL_MS and we never burn P21 quota when nothing reads.
+const PROBE_TTL_MS = 60_000;
+const PROBE_VIEW = "p21_view_inv_mast";
+// _uid columns are primary keys; safer than item_id if Olander remaps SKUs.
+const PROBE_SELECT = "inv_mast_uid";
+const PROBE_DISABLED = process.env.OLANDER_PROBE_DISABLED === "1";
+
+let probeCache = null;         // { at, token_ok, view_query_ok, last_error, latency_ms }
+let inflightProbe = null;      // Promise<probe-result>
+
 function nowMs() {
   return Date.now();
 }
@@ -256,6 +269,76 @@ async function getP21Token({ forceRefresh = false } = {}) {
       inflightMint = null;
     });
   return inflightMint;
+}
+
+// ---------------------------------------------------------------------------
+// P21 API probe — exercises the full auth + read path the chatbot depends on.
+// Reuses getP21Token (which respects the 24h token cache) and p21Fetch (which
+// already retries once on TokenError XML). Result is cached for PROBE_TTL_MS
+// so consecutive /healthz hits are cheap.
+// ---------------------------------------------------------------------------
+
+function probeErrorString(e) {
+  // e.code covers our tagged errors (credentials_pending, mint_failed,
+  // upstream_error, upstream_non_json). Fall back to message for surprises.
+  const raw = e?.code || e?.message || String(e);
+  return String(raw).slice(0, 80);
+}
+
+async function runP21Probe() {
+  const start = nowMs();
+  if (PROBE_DISABLED) {
+    // Escape hatch: if probe goes haywire in production, flip
+    // OLANDER_PROBE_DISABLED=1 + restart to silence the row without reverting.
+    return { token_ok: true, view_query_ok: true, last_error: "probe_disabled", latency_ms: 0 };
+  }
+  if (!CREDS_PRESENT) {
+    return { token_ok: false, view_query_ok: false, last_error: "credentials_pending", latency_ms: 0 };
+  }
+
+  let token_ok = false;
+  try {
+    await getP21Token({ forceRefresh: false });
+    token_ok = true;
+  } catch (e) {
+    return {
+      token_ok: false,
+      view_query_ok: false,
+      last_error: probeErrorString(e),
+      latency_ms: nowMs() - start,
+    };
+  }
+
+  try {
+    await p21Fetch(`/data/erp/views/v1/${PROBE_VIEW}`, {
+      searchParams: { "$top": 1, "$select": PROBE_SELECT },
+    });
+    return { token_ok, view_query_ok: true, last_error: null, latency_ms: nowMs() - start };
+  } catch (e) {
+    return {
+      token_ok,
+      view_query_ok: false,
+      last_error: probeErrorString(e),
+      latency_ms: nowMs() - start,
+    };
+  }
+}
+
+async function getProbeCached() {
+  const now = nowMs();
+  if (probeCache && now - probeCache.at < PROBE_TTL_MS) {
+    return probeCache;
+  }
+  if (inflightProbe) return inflightProbe;
+  inflightProbe = runP21Probe()
+    .then((result) => {
+      probeCache = { at: nowMs(), ...result };
+      return probeCache;
+    })
+    .finally(() => {
+      inflightProbe = null;
+    });
+  return inflightProbe;
 }
 
 // ---------------------------------------------------------------------------
@@ -525,11 +608,17 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/proxy/healthz") {
       const tokenAge =
         cachedToken != null ? Math.round((nowMs() - cachedToken.mintedAt) / 1000) : null;
+      const probe = await getProbeCached();
       send(res, 200, {
         ok: true,
         creds_present: CREDS_PRESENT,
         token_age_seconds: tokenAge,
         p21_reachable: cachedToken != null,
+        token_ok: probe.token_ok,
+        view_query_ok: probe.view_query_ok,
+        last_error: probe.last_error,
+        probe_latency_ms: probe.latency_ms,
+        probe_age_seconds: Math.round((nowMs() - probe.at) / 1000),
       });
       log("req", { method: "GET", path: url.pathname, status: 200, ms: nowMs() - started });
       return;

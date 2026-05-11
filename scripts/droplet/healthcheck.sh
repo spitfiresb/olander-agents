@@ -163,10 +163,15 @@ proxy_ok=false
 proxy_creds_present=false
 proxy_status=0
 proxy_latency=0
+proxy_token_ok=false
+proxy_view_ok=false
+proxy_last_error=""
 if [[ -n "$OLANDER_PROXY_TOKEN" ]]; then
   proxy_present=true
   proxy_start="$(now_ms)"
-  proxy_body="$(curl -sS --max-time 8 -w '\n%{http_code}' \
+  # --max-time 25: /healthz now runs an active P21 probe (mint + 1-row query)
+  # on cache miss. PROBE_TIMEOUT inside the proxy is 20s; give curl headroom.
+  proxy_body="$(curl -sS --max-time 25 -w '\n%{http_code}' \
     -H "Authorization: Bearer ${OLANDER_PROXY_TOKEN}" \
     "$PROXY_HEALTHZ_URL" 2>/dev/null || true)"
   proxy_end="$(now_ms)"
@@ -182,7 +187,37 @@ if [[ -n "$OLANDER_PROXY_TOKEN" ]]; then
     if [[ "$proxy_json" == *'"creds_present":true'* ]]; then
       proxy_creds_present=true
     fi
+    # Parse the deeper-probe fields. Python handles JSON correctly even when
+    # last_error contains quotes or escapes. Sanitize to printable ASCII so
+    # the record can never be broken by an exotic error string.
+    probe_parsed="$(printf '%s' "$proxy_json" | python3 -c '
+import json, sys, re
+try:
+    j = json.load(sys.stdin)
+except Exception:
+    j = {}
+def b(v): return "true" if v is True else "false"
+err = j.get("last_error") or ""
+err = re.sub(r"[^\x20-\x7e]", "", str(err))[:100]
+print(b(j.get("token_ok")))
+print(b(j.get("view_query_ok")))
+print(err)
+' 2>/dev/null || true)"
+    if [[ -n "$probe_parsed" ]]; then
+      proxy_token_ok="$(printf '%s' "$probe_parsed" | sed -n '1p')"
+      proxy_view_ok="$(printf '%s' "$probe_parsed" | sed -n '2p')"
+      proxy_last_error="$(printf '%s' "$probe_parsed" | sed -n '3p')"
+      [[ "$proxy_token_ok" == "true" || "$proxy_token_ok" == "false" ]] || proxy_token_ok=false
+      [[ "$proxy_view_ok" == "true" || "$proxy_view_ok" == "false" ]] || proxy_view_ok=false
+    fi
   fi
+fi
+
+# Derived: full P21 API path works (proxy reachable + token mint + view query).
+if [[ "$proxy_ok" == "true" && "$proxy_token_ok" == "true" && "$proxy_view_ok" == "true" ]]; then
+  p21_api_ok=true
+else
+  p21_api_ok=false
 fi
 
 # --- Check 6: Anthropic API status (third-party reference) ------------------
@@ -232,6 +267,12 @@ fi
 if [[ "$proxy_present" == "true" && "$proxy_ok" == "false" && "$overall" == "ok" ]]; then
   overall="degraded"
 fi
+# P21 API failure (auth or query) is degraded — same precedent as cert/proxy.
+# Gated on creds_present so the pre-creds bootstrap window doesn't downgrade.
+if [[ "$proxy_present" == "true" && "$proxy_creds_present" == "true" \
+   && "$p21_api_ok" == "false" && "$overall" == "ok" ]]; then
+  overall="degraded"
+fi
 
 # --- Build JSON via python (handles all escaping) ----------------------------
 record="$(
@@ -242,6 +283,7 @@ record="$(
   P21_OK="$p21_ok" P21_STATUS="$p21_status" P21_LATENCY="$p21_latency" P21_URL="$P21_PROBE_URL" \
   TLS_PRESENT="$tls_present" TLS_OK="$tls_ok" TLS_HOURS="$tls_hours" TLS_EXPIRES_AT="$tls_expires_at" \
   PROXY_PRESENT="$proxy_present" PROXY_OK="$proxy_ok" PROXY_STATUS="$proxy_status" PROXY_LATENCY="$proxy_latency" PROXY_CREDS="$proxy_creds_present" PROXY_URL="$PROXY_HEALTHZ_URL" \
+  P21_API_OK="$p21_api_ok" P21_TOKEN_OK="$proxy_token_ok" P21_VIEW_OK="$proxy_view_ok" P21_LAST_ERROR="$proxy_last_error" \
   ANTH_OK="$anth_ok" ANTH_INDICATOR="$anth_indicator" ANTH_STATUS="$anth_status" ANTH_LATENCY="$anth_latency" \
   python3 -c '
 import json, os
@@ -259,6 +301,7 @@ if b("TLS_PRESENT"):
   checks["tls_cert"] = {"ok": b("TLS_OK"), "hours_until_expiry": i("TLS_HOURS"), "expires_at": e["TLS_EXPIRES_AT"]}
 if b("PROXY_PRESENT"):
   checks["proxy_up"] = {"ok": b("PROXY_OK"), "http_status": i("PROXY_STATUS"), "latency_ms": i("PROXY_LATENCY"), "creds_present": b("PROXY_CREDS"), "url": e["PROXY_URL"]}
+  checks["p21_api"] = {"ok": b("P21_API_OK"), "token_ok": b("P21_TOKEN_OK"), "view_query_ok": b("P21_VIEW_OK"), "last_error": e["P21_LAST_ERROR"], "creds_present": b("PROXY_CREDS")}
 checks["anthropic"] = {"ok": b("ANTH_OK"), "indicator": e["ANTH_INDICATOR"], "http_status": i("ANTH_STATUS"), "latency_ms": i("ANTH_LATENCY")}
 print(json.dumps({
   "checked_at": e["CHECKED_AT"],
