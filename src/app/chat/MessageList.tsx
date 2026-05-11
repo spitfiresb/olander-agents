@@ -169,19 +169,32 @@ function Bubble({
     )
     .filter((s): s is string => Boolean(s));
 
-  // Once the answer is finalized (not streaming), tuck the intermediate
-  // reasoning + tool calls behind a disclosure and surface just the final
-  // text bubble. While streaming, show everything inline so the rep can
-  // watch the assistant work.
-  const lastTextGroupIndex = (() => {
-    for (let i = groups.length - 1; i >= 0; i--) {
-      if (groups[i].kind === "text") return i;
-    }
-    return -1;
-  })();
-  const hasStepGroups = lastTextGroupIndex > 0 && hasText;
-  const stepGroups = hasStepGroups ? groups.slice(0, lastTextGroupIndex) : [];
-  const finalGroups = hasStepGroups ? groups.slice(lastTextGroupIndex) : groups;
+  // Intermediate reasoning + tool calls live in the steps container from
+  // the moment the first tool call appears, so the layout is stable both
+  // during streaming and after. When streaming ends, only the disclosure
+  // pill fades in and the container collapses — no content relocates.
+  //
+  // Rule: if any tool call exists, treat the last text part (if any) as
+  // the current/final answer in the main column, and everything else as
+  // steps in the container. If the last part is a tool call (model is
+  // still working), keep everything in the container with no final yet.
+  const hasToolCall = groups.some((g) => g.kind === "tool");
+  const lastGroup = groups[groups.length - 1];
+  const lastIsText = lastGroup?.kind === "text";
+
+  let stepGroups: Group[];
+  let finalGroups: Group[];
+  if (!hasToolCall) {
+    stepGroups = [];
+    finalGroups = groups;
+  } else if (lastIsText) {
+    stepGroups = groups.slice(0, -1);
+    finalGroups = [lastGroup];
+  } else {
+    stepGroups = groups;
+    finalGroups = [];
+  }
+  const hasStepGroups = stepGroups.length > 0;
 
   return (
     <div className="group flex items-start gap-3 animate-message-in">
