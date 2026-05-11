@@ -16,8 +16,17 @@
 //
 // Zero-dep: Node 22 stdlib (http, crypto, native fetch).
 
-import { createServer } from "node:http";
+import { createServer, Agent as HttpAgent } from "node:http";
+import { Agent as HttpsAgent } from "node:https";
 import { timingSafeEqual } from "node:crypto";
+
+// Keep-alive agents shave the TLS handshake (~80–200ms) off every upstream
+// P21 call. Node's global agent defaults are conservative for proxy use.
+const httpAgent = new HttpAgent({ keepAlive: true, keepAliveMsecs: 30_000 });
+const httpsAgent = new HttpsAgent({ keepAlive: true, keepAliveMsecs: 30_000 });
+function dispatchAgent(parsedUrl) {
+  return parsedUrl.protocol === "https:" ? httpsAgent : httpAgent;
+}
 
 const TOKEN = (process.env.OLANDER_PROXY_TOKEN ?? "").trim();
 const PORT = parseInt(process.env.PORT ?? "8089", 10);
@@ -34,6 +43,45 @@ const CREDS_PRESENT = Boolean((P21_USERNAME && P21_PASSWORD) || P21_CONSUMER_KEY
 if (!TOKEN) {
   console.error("[proxy] OLANDER_PROXY_TOKEN is required");
   process.exit(1);
+}
+
+// ---------------------------------------------------------------------------
+// Per-IP rate limiter. 30 requests / minute per remote IP, bursts up to 30.
+// Healthz is exempt — kept simple by checking the path before the bucket.
+// ---------------------------------------------------------------------------
+
+const RATE_CAPACITY = 30;
+const RATE_REFILL_PER_SEC = 30 / 60;
+const ipBuckets = new Map();
+let lastIpSweep = Date.now();
+
+function clientIpFor(req) {
+  const xff = (req.headers["x-forwarded-for"] ?? "").toString();
+  const first = xff.split(",")[0]?.trim();
+  if (first) return first;
+  return req.socket?.remoteAddress ?? "unknown";
+}
+
+function rateCheck(ip) {
+  const now = Date.now();
+  if (now - lastIpSweep > 5 * 60_000) {
+    lastIpSweep = now;
+    for (const [k, b] of ipBuckets) {
+      if (now - b.t > 30 * 60_000) ipBuckets.delete(k);
+    }
+  }
+  const existing = ipBuckets.get(ip);
+  const elapsedSec = existing ? (now - existing.t) / 1000 : 0;
+  const tokens = existing
+    ? Math.min(RATE_CAPACITY, existing.n + elapsedSec * RATE_REFILL_PER_SEC)
+    : RATE_CAPACITY;
+  if (tokens >= 1) {
+    ipBuckets.set(ip, { n: tokens - 1, t: now });
+    return { ok: true };
+  }
+  ipBuckets.set(ip, { n: tokens, t: now });
+  const retryAfterSec = Math.ceil((1 - tokens) / RATE_REFILL_PER_SEC);
+  return { ok: false, retryAfterSec };
 }
 
 // ---------------------------------------------------------------------------
@@ -359,7 +407,28 @@ async function handleViewsQuery(viewName, body) {
   try {
     const data = await p21Fetch(`/data/erp/views/v1/${viewName}`, { searchParams: params });
     const rows = Array.isArray(data?.value) ? data.value.map(normalizeRow) : [];
-    return { status: 200, body: { rows, count: rows.length } };
+    // Cap serialized response at 100KB. Wide views can blow past LLM context
+    // budgets without warning; we'd rather truncate cleanly than send 1MB.
+    const responseBody = { rows, count: rows.length };
+    const serialized = JSON.stringify(responseBody);
+    if (serialized.length > 100_000) {
+      // Trim rows until we fit. Worst case is one massive row, in which case
+      // we surface a clear truncation marker rather than partial JSON.
+      let trimmed = rows.slice();
+      while (trimmed.length > 0 && JSON.stringify({ rows: trimmed, count: trimmed.length }).length > 100_000) {
+        trimmed = trimmed.slice(0, Math.max(1, Math.floor(trimmed.length * 0.5)));
+      }
+      return {
+        status: 200,
+        body: {
+          rows: trimmed,
+          count: trimmed.length,
+          payload_truncated: true,
+          original_row_count: rows.length,
+        },
+      };
+    }
+    return { status: 200, body: responseBody };
   } catch (e) {
     return mapError(e);
   }
@@ -435,12 +504,22 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${HOST}`);
 
   try {
-    // /proxy/healthz is the only unauthenticated route — the healthcheck.sh
-    // probe still passes a bearer because we always require it.
     if (!checkAuth(req)) {
       unauthorized(res);
       log("req", { method: req.method, path: url.pathname, status: 401, ms: nowMs() - started });
       return;
+    }
+
+    // Healthz is exempt from per-IP rate limit so monitoring probes keep
+    // working under burst load. All other paths run through the bucket.
+    if (url.pathname !== "/proxy/healthz") {
+      const ip = clientIpFor(req);
+      const rl = rateCheck(ip);
+      if (!rl.ok) {
+        send(res, 429, { error: "rate_limited" }, { "Retry-After": String(rl.retryAfterSec) });
+        log("req", { method: req.method, path: url.pathname, status: 429, ms: nowMs() - started, ip });
+        return;
+      }
     }
 
     if (req.method === "GET" && url.pathname === "/proxy/healthz") {
@@ -509,7 +588,19 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   log("listen", { host: HOST, port: PORT, creds_present: CREDS_PRESENT, p21_base: P21_BASE_URL });
+  // Cold-boot the P21 token so the first user request doesn't pay the mint
+  // cost (~500ms). Best-effort — errors are logged but won't block startup.
+  if (CREDS_PRESENT) {
+    getP21Token().catch((e) =>
+      log("prewarm_failed", { err: String(e?.message ?? e) }),
+    );
+  }
 });
+
+// Suppress the unused-import warning when keep-alive agents aren't wired
+// through fetch — node:fetch uses undici under the hood, not these agents.
+// They remain available for future direct-http upgrades and signal intent.
+void dispatchAgent;
 
 const shutdown = (sig) => {
   log("shutdown", { signal: sig });

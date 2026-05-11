@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ChatStatus, UIMessage } from "ai";
+import { AssistantContent } from "@/components/chat/AssistantContent";
+import { isToolPart, ToolCallCard, type ToolPartLike } from "@/components/chat/ToolCallCard";
+import { summarizeToolUsageForCitation } from "@/lib/ai/tool-labels";
 import { EmptyState } from "./EmptyState";
 
 const STUCK_THRESHOLD_PX = 80;
@@ -42,6 +45,7 @@ export function MessageList({ messages, status, onRegenerate, onSelectSuggestion
 
   const isEmpty = messages.length === 0;
   const showJumpPill = !isEmpty && !stuckToBottom;
+  const lastMessageId = messages.length > 0 ? messages[messages.length - 1].id : null;
 
   const lastAssistantIndex = (() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -66,7 +70,15 @@ export function MessageList({ messages, status, onRegenerate, onSelectSuggestion
               />
             ))
           )}
-          {status === "submitted" && <TypingIndicator />}
+          {status === "submitted" && (
+            // Only show the standalone typing indicator before the assistant
+            // has started any tool call or text — once parts arrive, the
+            // bubble itself shows in-flight states.
+            lastMessageId == null ||
+            messages[messages.length - 1].role !== "assistant" ? (
+              <TypingIndicator />
+            ) : null
+          )}
         </div>
       </div>
       {showJumpPill && (
@@ -92,10 +104,12 @@ function Bubble({
   onRegenerate: () => void;
 }) {
   const isUser = message.role === "user";
-  const text = message.parts
-    .filter((p): p is { type: "text"; text: string } => p.type === "text")
-    .map((p) => p.text)
-    .join("");
+
+  const textParts = message.parts.filter(
+    (p): p is { type: "text"; text: string } =>
+      typeof p === "object" && p !== null && "type" in p && p.type === "text",
+  );
+  const text = textParts.map((p) => p.text).join("");
 
   if (isUser) {
     return (
@@ -107,14 +121,48 @@ function Bubble({
     );
   }
 
+  const toolParts: ToolPartLike[] = message.parts.filter(isToolPart);
+  const hasText = text.length > 0;
+  const citations = toolParts
+    .map((part) =>
+      summarizeToolUsageForCitation(
+        part.type.replace(/^tool-/, ""),
+        part.input,
+        part.output,
+      ),
+    )
+    .filter((s): s is string => Boolean(s));
+
   return (
     <div className="group flex items-start gap-3 animate-message-in">
       <Avatar />
       <div className="flex min-w-0 flex-1 flex-col gap-3">
-        <div className="max-w-[90%] whitespace-pre-wrap rounded-2xl border border-brand-charcoal/10 bg-white px-4 py-2.5 leading-relaxed text-brand-charcoal">
-          {text}
-        </div>
-        {showActions && <MessageActions text={text} onRegenerate={onRegenerate} />}
+        {toolParts.length > 0 && (
+          <div className="relative flex flex-col gap-2">
+            {toolParts.length > 1 && (
+              <span
+                aria-hidden
+                className="absolute -left-3 top-2 h-[calc(100%-1rem)] w-px bg-brand-charcoal/15"
+              />
+            )}
+            {toolParts.map((p, i) => (
+              <ToolCallCard key={p.toolCallId ?? i} part={p} />
+            ))}
+          </div>
+        )}
+        {hasText && (
+          <div className="max-w-[90%] rounded-2xl border border-brand-charcoal/10 bg-white px-4 py-3 leading-relaxed text-brand-charcoal">
+            <AssistantContent text={text} />
+          </div>
+        )}
+        {citations.length > 0 && hasText && (
+          <div className="max-w-[90%] text-[11px] text-brand-ink-soft">
+            Data: {citations.join(", ")}
+          </div>
+        )}
+        {showActions && hasText && (
+          <MessageActions text={text} onRegenerate={onRegenerate} />
+        )}
       </div>
     </div>
   );
@@ -228,9 +276,9 @@ function TypingIndicator() {
     <div className="flex items-start gap-3 animate-message-in">
       <Avatar />
       <div className="flex items-center gap-1 rounded-2xl border border-brand-charcoal/10 bg-white px-4 py-3">
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-ink-soft [animation-delay:0ms]" />
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-ink-soft [animation-delay:150ms]" />
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-ink-soft [animation-delay:300ms]" />
+        <span className="animate-typing-dot h-1.5 w-1.5 rounded-full bg-brand-ink-soft [animation-delay:0ms]" />
+        <span className="animate-typing-dot h-1.5 w-1.5 rounded-full bg-brand-ink-soft [animation-delay:200ms]" />
+        <span className="animate-typing-dot h-1.5 w-1.5 rounded-full bg-brand-ink-soft [animation-delay:400ms]" />
       </div>
     </div>
   );

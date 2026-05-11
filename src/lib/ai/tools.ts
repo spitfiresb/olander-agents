@@ -60,6 +60,25 @@ async function callProxy(
   return parsed;
 }
 
+// Reject filter patterns that look like SQL injection attempts, even though
+// the upstream OData service is parameterized. The proxy is a single line of
+// defense; making the tool refuse obviously malformed input is a second.
+const SAFE_FILTER = z
+  .string()
+  .max(1024, "filter too long")
+  .refine((s) => !/;|--|\/\*|\*\//.test(s), "filter contains forbidden character sequence")
+  .refine((s) => {
+    // OData allows single-quoted string literals. Disallow stray semicolons
+    // anyway and require quote balance so 'O''Brien' style escapes work.
+    const stripped = s.replace(/''/g, "").replace(/'[^']*'/g, "");
+    return !stripped.includes("'");
+  }, "filter has unbalanced string quotes");
+
+const SAFE_ORDER_BY = z
+  .string()
+  .max(128)
+  .regex(/^[a-z0-9_]+(\s+(asc|desc))?$/i, "orderBy must be `<column>` or `<column> asc|desc`");
+
 const viewsQuery = tool({
   description:
     "Run a filtered, projected, sorted query against a P21 SQL view via the droplet proxy. " +
@@ -76,30 +95,31 @@ const viewsQuery = tool({
     viewName: z
       .string()
       .regex(/^p21_view_[a-z0-9_]+$/i, "must match p21_view_* (e.g. p21_view_inv_mast)"),
-    filter: z
-      .string()
-      .optional()
-      .describe(
-        "OData $filter expression — e.g. \"startswith(item_id,'P26') and delete_flag eq 'N'\".",
-      ),
+    filter: SAFE_FILTER.optional().describe(
+      "OData $filter expression — e.g. \"startswith(item_id,'P26') and delete_flag eq 'N'\".",
+    ),
     top: z
       .number()
       .int()
       .min(1)
-      .max(200)
+      .max(50)
       .optional()
-      .describe("Page size. Default 20. Cap 200 — never request more; LLMs don't benefit from huge result sets."),
-    skip: z.number().int().min(0).optional(),
+      .describe(
+        "Page size. Default 20. Cap 50 — LLMs don't benefit from huge result sets and rows blow up context.",
+      ),
+    skip: z.number().int().min(0).max(10_000).optional(),
     select: z
-      .union([z.string(), z.array(z.string())])
+      .union([
+        z.string().max(512).regex(/^[a-z0-9_,\s]+$/i, "select: alphanumeric column names only"),
+        z.array(z.string().regex(/^[a-z0-9_]+$/i)).max(40),
+      ])
       .optional()
       .describe(
         "Comma-separated column list, or array of names. Project aggressively — views are wide.",
       ),
-    orderBy: z
-      .string()
-      .optional()
-      .describe('e.g. "item_id" or "date_created desc". Pair with skip/top for stable paging.'),
+    orderBy: SAFE_ORDER_BY.optional().describe(
+      'e.g. "item_id" or "date_created desc". Pair with skip/top for stable paging.',
+    ),
   }),
   execute: async (input) => {
     const result = await callProxy("POST", `/proxy/views/${encodeURIComponent(input.viewName)}`, {
@@ -112,6 +132,15 @@ const viewsQuery = tool({
     return result;
   },
 });
+
+// Reject suspicious entity IDs (newlines, slashes, quotes) before they hit
+// the proxy URL. P21 IDs are reliably alphanumeric + dashes/dots, which keeps
+// us well inside what the upstream paths can encode without surprise.
+const SAFE_ID = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z0-9._-]+$/, "id must be alphanumeric (dash/dot/underscore allowed)");
 
 const entityGet = tool({
   description:
@@ -135,9 +164,11 @@ const entityGet = tool({
       .describe(
         "e.g. 'v2/parts', 'customers', 'orders', 'purchaseorders'. May contain a version segment.",
       ),
-    id: z.string().min(1).describe("The entity's ID — e.g. 'PN12345-01' for a part."),
+    id: SAFE_ID.describe("The entity's ID — e.g. 'PN12345-01' for a part."),
     extendedProperties: z
       .string()
+      .max(256)
+      .regex(/^[A-Za-z0-9_,]*$/, "extendedProperties: alphanumeric + comma only")
       .optional()
       .describe("Optional endpoint-specific value to fetch related sub-objects in one call."),
   }),

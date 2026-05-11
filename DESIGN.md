@@ -325,20 +325,6 @@ Lives in `brand/` at the project root.
 
 `brand/client_logo.svg` is for **design reference only** — pasting into mockups, comparing layouts, etc. The in-app logo is `src/components/Logo.tsx` (inline SVG, color tracks `--color-brand-red`). Don't import the reference SVG into the product; if `Logo.tsx` ever drifts visually, re-trace from the reference, don't link to it.
 
-### How the SVG came to exist
-
-The live site serves the logo as **white-on-transparent** — the red box is applied via CSS background. The site routes through Next.js's `/_next/image` endpoint, which content-negotiates to **AVIF** for modern browsers — that's why "Save image as…" gives a `.avif`. The SVG in this folder was traced from the screenshot (via QuiverAI's Arrow tool) so we have a clean vector lockup that doesn't depend on the site's CSS to look right.
-
-Re-pull the raw raster wordmark from the site (transparent bg, no red box):
-
-```bash
-curl -sL -o /tmp/olander.webp \
-  "https://www.olander.com/_next/static/media/orlander-logo.3078536f.png"
-sips -s format png /tmp/olander.webp --out wordmark.png
-```
-
-> Browser fallback: DevTools → Network → filter Img → click the logo request → Response tab → save raw bytes (you get the original WebP, not the AVIF the `<img>` element actually rendered).
-
 ---
 
 ## Key Files

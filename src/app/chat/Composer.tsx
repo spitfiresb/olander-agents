@@ -82,6 +82,7 @@ export function Composer({
           className="flex items-end gap-2 rounded-2xl border border-brand-charcoal/15 bg-white p-2 shadow-[0_-4px_16px_-12px_rgba(45,46,41,0.15)] transition-colors focus-within:border-brand-red/40 focus-within:ring-1 focus-within:ring-brand-red/20"
         >
           <textarea
+            data-composer-input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}

@@ -1,20 +1,47 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
+import { DefaultChatTransport, type UIMessage } from "ai";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { PlusIcon } from "@/components/icons";
 import { Wordmark } from "@/components/Wordmark";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
-import { Sidebar } from "./Sidebar";
+import { Sidebar, type ConversationSummary } from "./Sidebar";
 import { signOutAction } from "./actions";
 
-export function ChatShell() {
-  const [transport] = useState(
-    () => new DefaultChatTransport({ api: "/api/chat" }),
+type Props = {
+  initialConversationId?: string;
+  initialMessages?: UIMessage[];
+};
+
+export function ChatShell({ initialConversationId, initialMessages }: Props) {
+  const router = useRouter();
+  // Lives outside React state so the transport's body callback (which fires
+  // outside the React render path) can read the current id without a
+  // re-render. Mirrored into state for the sidebar's "active" highlight.
+  const conversationIdRef = useRef<string | null>(initialConversationId ?? null);
+  const [conversationId, setConversationId] = useState<string | null>(
+    initialConversationId ?? null,
   );
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+
+  // Single transport for the shell's lifetime. `body` is invoked per-request
+  // by the AI SDK, so reading the ref there is safe — it's not a render-time
+  // access of `.current` even though the source position is inside an
+  // initializer. The `useState` form lets us construct it lazily, once.
+  /* eslint-disable react-hooks/refs */
+  const [transport] = useState(
+    () =>
+      new DefaultChatTransport({
+        api: "/api/chat",
+        body: () => ({ conversationId: conversationIdRef.current ?? undefined }),
+      }),
+  );
+  /* eslint-enable react-hooks/refs */
+
   const [input, setInput] = useState("");
   const {
     messages,
@@ -25,17 +52,139 @@ export function ChatShell() {
     regenerate,
     setMessages,
     clearError,
-  } = useChat({ transport });
+  } = useChat({ transport, messages: initialMessages });
 
-  const clearChat = () => {
+  async function refreshConversations() {
+    try {
+      const res = await fetch("/api/conversations", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as { conversations: ConversationSummary[] };
+      setConversations(data.conversations ?? []);
+    } catch {
+      // sidebar history is non-critical; fail silently
+    }
+  }
+
+  useEffect(() => {
+    // Mount-time fetch: the sidebar list is owned by the server, so the
+    // first render needs a fetch. setState in this effect is intentional.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshConversations();
+  }, []);
+
+  // After every assistant message lands, refresh the sidebar — the active
+  // row's updatedAt has moved, and any new chat now has a row.
+  const lastStatusRef = useRef(status);
+  useEffect(() => {
+    if (lastStatusRef.current !== "ready" && status === "ready") {
+      void refreshConversations();
+    }
+    lastStatusRef.current = status;
+  }, [status]);
+
+  function startNewChat() {
     setMessages([]);
     clearError();
     setInput("");
-  };
+    conversationIdRef.current = null;
+    setConversationId(null);
+    router.push("/chat");
+  }
+
+  async function submitMessage(text: string) {
+    // Pre-create the conversation so subsequent turns and the URL both see
+    // a real id. Skip on the second+ turn (id already set), and tolerate
+    // failures — the chat route will create one server-side if we miss.
+    if (!conversationIdRef.current) {
+      try {
+        const res = await fetch("/api/conversations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: text }),
+        });
+        if (res.ok) {
+          const data = (await res.json()) as {
+            conversation: { id: string };
+          };
+          conversationIdRef.current = data.conversation.id;
+          setConversationId(data.conversation.id);
+          // History API instead of router.replace: we want the URL to track
+          // the new conversation id, but `router.replace` triggers a Next
+          // navigation that remounts ChatShell — which would drop the
+          // in-flight `useChat` state and show the empty placeholder while
+          // the assistant streams onto the unmounted component. Updating
+          // history directly keeps the running component alive; the next
+          // hard navigation (refresh, deep link) hits /chat/[id] cleanly.
+          window.history.replaceState(null, "", `/chat/${data.conversation.id}`);
+        }
+      } catch {
+        // Falls through — server will create if we didn't send an id
+      }
+    }
+    sendMessage({ text });
+  }
+
+  useEffect(() => {
+    function copyLatestAssistant() {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        if (m.role !== "assistant") continue;
+        const text = m.parts
+          .filter(
+            (p): p is { type: "text"; text: string } =>
+              typeof p === "object" && p !== null && "type" in p && p.type === "text",
+          )
+          .map((p) => p.text)
+          .join("");
+        if (text) {
+          navigator.clipboard.writeText(text).catch(() => {});
+          return;
+        }
+      }
+    }
+
+    function handler(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        startNewChat();
+        return;
+      }
+      if (mod && e.key === "/") {
+        e.preventDefault();
+        const el = document.querySelector<HTMLTextAreaElement>("textarea[data-composer-input]");
+        el?.focus();
+        return;
+      }
+      if (mod && e.shiftKey && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        copyLatestAssistant();
+        return;
+      }
+      if (e.key === "Escape" && (status === "streaming" || status === "submitted")) {
+        e.preventDefault();
+        stop();
+      }
+    }
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, status]);
+
+  async function onDeleteConversation(id: string) {
+    await fetch(`/api/conversations/${id}`, { method: "DELETE" });
+    await refreshConversations();
+    if (conversationId === id) startNewChat();
+  }
 
   return (
     <div className="flex h-dvh bg-brand-canvas">
-      <Sidebar onNewChat={clearChat} />
+      <Sidebar
+        conversations={conversations}
+        activeId={conversationId}
+        onNewChat={startNewChat}
+        onDelete={onDeleteConversation}
+      />
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Mobile / tablet top bar (hidden on lg+) */}
@@ -49,7 +198,7 @@ export function ChatShell() {
           </Link>
           <button
             type="button"
-            onClick={clearChat}
+            onClick={startNewChat}
             aria-label="Start a new chat"
             className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-white/15 bg-white/5 text-white transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal"
           >
@@ -80,7 +229,7 @@ export function ChatShell() {
             setInput={setInput}
             status={status}
             error={error}
-            onSubmit={(text) => sendMessage({ text })}
+            onSubmit={(text) => void submitMessage(text)}
             onStop={stop}
             onRegenerate={() => regenerate()}
           />

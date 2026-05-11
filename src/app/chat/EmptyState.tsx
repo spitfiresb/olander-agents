@@ -3,10 +3,10 @@
 import { Logo } from "@/components/Logo";
 
 const SUGGESTIONS = [
-  "Look up customer ACME-1234",
-  "Find part SKU 8501-22",
-  "Open orders for ACME this month",
-  "What can you do right now?",
+  "What size helicoil goes in a 3/8-16 hole?",
+  "Do we have any M10 1.25 socket head cap screws in stock?",
+  "Stainless customers who haven't ordered in 90 days",
+  "Who carries bronze cap screws?",
 ];
 
 export function EmptyState({
