@@ -109,7 +109,7 @@ function Bubble({
     (p): p is { type: "text"; text: string } =>
       typeof p === "object" && p !== null && "type" in p && p.type === "text",
   );
-  const text = textParts.map((p) => p.text).join("");
+  const text = textParts.map((p) => p.text).join("\n\n");
 
   if (isUser) {
     return (
@@ -138,13 +138,7 @@ function Bubble({
       <Avatar />
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         {toolParts.length > 0 && (
-          <div className="relative flex flex-col gap-2">
-            {toolParts.length > 1 && (
-              <span
-                aria-hidden
-                className="absolute -left-3 top-2 h-[calc(100%-1rem)] w-px bg-brand-charcoal/15"
-              />
-            )}
+          <div className="flex flex-col gap-2">
             {toolParts.map((p, i) => (
               <ToolCallCard key={p.toolCallId ?? i} part={p} />
             ))}

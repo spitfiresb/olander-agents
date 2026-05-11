@@ -87,7 +87,7 @@ export function Sidebar({ conversations, activeId, onNewChat, onDelete }: Props)
                   >
                     <Link
                       href={`/chat/${row.id}`}
-                      className={`block flex-1 truncate rounded-md px-2 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal ${
+                      className={`block flex-1 truncate rounded-md py-1.5 pl-2 pr-8 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal ${
                         row.id === activeId
                           ? "bg-white/10 text-white"
                           : "text-white/70 hover:bg-white/5 hover:text-white"
