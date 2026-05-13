@@ -24,14 +24,20 @@ import {
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-// Long enough for a full sync but well inside Vercel's serverless ceiling.
-// At ~99K rows worst-case (mass re-embed), expect 5-10 min.
-export const maxDuration = 800;
+// 300s is Vercel's Hobby cap (Pro allows up to 900). A full re-embed of
+// the ~99K-row catalog blows past this — that's fine because the daily
+// cron is incremental: only rows whose source has changed since the last
+// sync are re-embedded, which is normally a handful per run. If a mass
+// re-embed is ever needed (Voyage release with new dim, schema flip),
+// run scripts/backfill-catalog.ts locally where there's no time budget.
+export const maxDuration = 300;
 
 const PAGE = 200;
 const EMBED_BATCH = 100;
 const MAX_TOKENS = 50_000_000;
-const MAX_DURATION_MS = 12 * 60_000;
+// Bail well inside maxDuration so the loop's "finishing batch" graceful
+// exit always wins over Vercel's hard kill.
+const MAX_DURATION_MS = 270 * 1000;
 
 const PROXY_URL = (process.env.DROPLET_PROXY_URL ?? "").replace(/\/+$/, "");
 const PROXY_TOKEN = process.env.DROPLET_PROXY_TOKEN ?? "";
