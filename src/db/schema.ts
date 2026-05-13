@@ -10,11 +10,9 @@ import {
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
 
-// Catalog vectors live in Pinecone now, not Postgres — see RETRIEVAL.md
-// § Vector store for the history (hit Neon Free's 512 MB at 36K rows; split
-// stack moves the binding constraint off the shared app DB). The pgvector
-// extension stays enabled on Neon (no-op cost) in case future smaller
-// indexes want it back.
+// Catalog vectors live in Qdrant, not Postgres — see docs/Vector_Store.md.
+// The pgvector extension stays enabled on Neon (no-op cost) in case future
+// smaller indexes want it back.
 
 // Kept as text rather than pgEnum so adding tiers is a no-op migration — adding
 // `revoked` here required zero schema change (the new `member` table did need
@@ -141,13 +139,13 @@ export const messages = pgTable(
 );
 
 // Catalog row metadata — one row per inv_mast_uid mirroring p21_view_inv_mast.
-// The actual vector lives in Pinecone (see src/lib/ai/pinecone.ts) keyed on
-// the same inv_mast_uid. This table carries:
+// The actual vector lives in Qdrant (see src/lib/ai/qdrant.ts) keyed on the
+// same inv_mast_uid. This table carries:
 //   - `embed_input_hash`: dedupe key for backfill / sync. Same text ⇒ same
-//     hash ⇒ no re-embed, no Pinecone re-upsert.
+//     hash ⇒ no re-embed, no Qdrant re-upsert.
 //   - the descriptive fields: source of truth for any callers that need the
-//     full row without a Pinecone fetch (audit, exports, future joins).
-// `embeddedAt` records when we last pushed this row's vector to Pinecone.
+//     full row without a Qdrant fetch (audit, exports, future joins).
+// `embeddedAt` records when we last pushed this row's vector to Qdrant.
 export const catalogItem = pgTable("catalog_item", {
   invMastUid: integer("inv_mast_uid").primaryKey(),
   // NOT unique. Olander's P21 has duplicate item_ids across inv_mast_uids —

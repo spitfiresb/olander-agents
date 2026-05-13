@@ -190,10 +190,10 @@ const entityGet = tool({
 // ---------------------------------------------------------------------------
 // searchCatalog — semantic search over the parts catalog
 //
-// Backed by a Pinecone serverless index (1024d cosine, AWS us-east-1). One
-// vector per inv_mast_uid, embedded once with voyage-4-large during backfill.
-// The Neon `catalog_item` table mirrors the row metadata + dedupe hash but
-// the live vectors live in Pinecone — see RETRIEVAL.md § Vector store.
+// Backed by the Qdrant Cloud `olander-catalog` collection (1024d cosine).
+// One vector per inv_mast_uid, embedded once with voyage-4-large during
+// backfill. The Neon `catalog_item` table mirrors the row metadata + dedupe
+// hash but the live vectors live in Qdrant — see docs/Vector_Store.md.
 //
 // The model picks this tool for descriptive part questions ("M10 stainless
 // cap screw, ~50mm"), then chains into viewsQuery / entityGet for live

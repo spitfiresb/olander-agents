@@ -2,15 +2,15 @@
 
 Postgres lives on Neon, provisioned through the Vercel-Neon integration on the `olander-agents` Vercel project. The app talks to it through Drizzle ORM. The schema is the standard Auth.js (next-auth) Drizzle adapter shape plus a `role` column on `user` for our tier model.
 
-There is **one** Neon project. If you find a second one, something is wrong — see [History](#history) below.
+There is **one** Neon project. If you find a second one, something is wrong.
 
 ## Where it lives
 
 - **Neon project:** `olander-agents` (id `<neon-project-id>`)
 - **Neon org:** `Vercel: olanderagents-9868's projects` — managed by Vercel, do not detach
-- **Region:** `aws-us-east-1`
+- **Region:** `aws-us-west-2` (Portland / pdx1, to sit next to the sfo1 Vercel functions and us-west-1 Qdrant)
 - **Postgres version:** 17
-- **Default branch:** `main` (id `br-bold-rice-apsq5gqy`)
+- **Default branch:** `main` (find current id in Neon console)
 - **Database:** `neondb`
 - **Console:** https://console.neon.tech/app/projects/<neon-project-id>
 
@@ -115,7 +115,7 @@ If you're prototyping a schema change locally and want to throw it away, push ag
 `.env.local` (gitignored) needs at minimum:
 
 ```
-DATABASE_URL=postgresql://neondb_owner:<password>@<neon-host>.neon.tech/neondb?channel_binding=require&sslmode=require
+DATABASE_URL=postgresql://neondb_owner:<password>@<neon-host>.neon.tech/neondb?sslmode=require
 ```
 
 Use the **direct** (non-`-pooler`) host for local — Drizzle-kit will be unhappy with the pooler for some DDL operations.
@@ -133,24 +133,6 @@ To get the password without copy-pasting from someone else:
 - **Sign-in produces three rows.** A successful Entra sign-in writes one row each to `user`, `account`, and `session`. If you see fewer, the adapter wiring is broken — start from `src/auth.ts`.
 - **Drizzle's own table.** `neondb.drizzle.__drizzle_migrations` tracks which migrations have been applied. Don't touch it manually unless you know what you're doing.
 - **Auth.js requires the database session strategy** (configured in `src/auth.ts`) for the Drizzle adapter to populate the `session` table. JWT-strategy sessions skip the DB entirely — switching strategies would break our user-tier model unless the role is duplicated into the JWT.
-
-## History
-
-Date: 2026-05-09 to 2026-05-10.
-
-The project initially had **two** Neon projects, which is why this doc keeps emphasizing one:
-
-1. A standalone `Olander Agents` project in us-west-2 — created manually, was where local dev pointed and where the schema first landed.
-2. The Vercel-managed `olander-agents` project in us-east-1 — created when the Vercel-Neon integration was installed.
-
-Local dev had been writing schema (and would have written user data) into #1, while any deployed Vercel build would have hit #2 with no schema. We consolidated onto #2 by:
-
-- Pointing `.env.local` at #2's direct host
-- Generating and applying the initial Drizzle migration (`0000_talented_invisible_woman.sql`)
-- Verifying end-to-end Entra sign-in landed rows in #2
-- Deleting #1
-
-The standalone `Olander Agents` Neon org still exists but is empty. Neon doesn't expose org deletion via API/MCP — clean it up from the console if it bothers you.
 
 ## Quick reference
 

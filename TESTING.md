@@ -140,12 +140,45 @@ Update this file when a new class of regression bites us. Promote sections up th
 - [ ] After the `0002` migration: `SELECT email, role FROM member` shows the seeded bootstrap admins (+ a row per pre-existing `user`). Some migration steps in `0002` are hand-written SQL appended after the generated `CREATE TABLE` — re-generating won't reproduce them, so don't regenerate `0002`.
 
 ### Things to watch for
-- **One Neon project only** (`<neon-project-id>`, Vercel-managed) — do *not* create a second project. See `docs/db.md`.
+- **One Neon project only** (`<neon-project-id>`, Vercel-managed, `aws-us-west-2`) — do *not* create a second project. See `docs/db.md`.
 - **Schema drift** — if you edit `src/db/schema.ts` without running `db:generate`, the deployed DB diverges silently. Always generate + commit the migration.
 
 ---
 
-## 6. UI / styling
+## 6. Retrieval / catalog-vector index
+
+**Surface:** `src/lib/ai/tools.ts` (`searchCatalog`), `src/lib/ai/embeddings.ts`, `src/lib/ai/qdrant.ts`, `src/db/schema.ts` (`catalog_item`), `drizzle/0002_*` + `drizzle/0003_*` + `drizzle/0004_*`, `scripts/backfill-catalog.ts`, `scripts/sync-catalog.ts`, `scripts/create-qdrant-collection.ts`, `src/app/api/cron/sync-catalog/route.ts`, `vercel.json` cron entry. See [`RETRIEVAL.md`](RETRIEVAL.md) for design and [`docs/Retrieval_Runbook.md`](docs/Retrieval_Runbook.md) for ops.
+
+**Why low (for now):** brand-new surface. The lock-step write order (Qdrant first, Neon hash second) is load-bearing and the most likely place a regression would surface.
+
+### Smoke check
+- [ ] Ask the chat a descriptive part question ("M10 stainless cap screw, around 50mm") → model picks `searchCatalog`, top result is the obvious SKU.
+- [ ] Ask an exact-SKU question ("show me PN12345-01") → model picks `entityGet` (or `viewsQuery`), **not** `searchCatalog`.
+- [ ] After `searchCatalog`, the model chains into `viewsQuery p21_view_inv_loc` for live stock.
+- [ ] `npx tsx --env-file=.env.local scripts/smoke-search-catalog.ts` passes all 10 hand-picked descriptive queries with the expected SKU in top-3 (runs against an isolated `olander-catalog-smoke` Qdrant collection that's torn down after). Add `VOYAGE_QPS_DELAY_MS=22000` only if Voyage is on the no-billing free tier (3 RPM cap).
+
+### Things to watch for
+- **Vector dim must stay 1024.** Every Voyage call pins `output_dimension=1024`; the Qdrant collection is created with `size: 1024` (validated by `scripts/create-qdrant-collection.ts` on every run — mismatch refuses to continue). A vendor default flip is the only realistic way this could break.
+- **Qdrant write must come before Neon hash update.** The backfill/sync code is written so Qdrant upsert happens first, then the Neon hash is bumped. If Qdrant fails, the Neon hash stays stale and the next sync retries. Reversing the order would create rows that *claim* to be embedded while Qdrant has no vector — silently missing from search until the row's text changes again. Don't refactor the write order without auditing this invariant.
+- **`delete_flag` lives in two places.** Soft-delete writes BOTH the Neon row (`set: { deleteFlag: true }`) AND the Qdrant payload (`setCatalogPayload(uid, { delete_flag: true })`). The query filter is on the Qdrant side. Forgetting to flip Qdrant leaves a "ghost" SKU answering descriptive queries even though Neon shows it deleted.
+- **`delete_flag` is boolean, not `'Y'`/`'N'`.** The droplet proxy normalizes P21's `"Y"`/`"N"` flags to JSON booleans before they reach us; both Neon's column and Qdrant's payload mirror that. Write `true`/`false`, query against `delete_flag = false`.
+- **Local backfill needs unblocked network access to the droplet AND respect the proxy's 30 RPM bucket.** The script's `PAGE_DELAY_MS` (default 2500) keeps us under that. Corporate TLS-interception middleboxes (Fortinet, Zscaler) break Let's Encrypt cert validation; production (Vercel) sees no middlebox.
+- **`/api/cron/sync-catalog` is gated on `CRON_SECRET`.** Without it, the endpoint always 401s. Confirm it's set in Vercel project env (Production + Preview). Also confirm `QDRANT_URL` and `QDRANT_API_KEY` are set there or the endpoint 503s with `qdrant_not_configured`.
+- **Voyage free tier without billing is 3 RPM / 10K TPM.** Production traffic needs a payment method on file; first 200M tokens stay free either way.
+- **Qdrant Cloud free tier is 4 GB / single node.** ~99K vectors at 1024d sits at ~700 MB, comfortable. The cap is the practical ceiling on adding a second collection (docs, customer embeddings) without upgrading.
+
+### When you change `embeddings.ts` or the embed-input shape
+- [ ] Run `npm test` — the unit tests pin `buildEmbedInput`'s exact output for several real Olander-shaped rows. Changing the shape changes every hash, which forces a full re-embed on next sync. Make sure that's what you want.
+- [ ] Sanity-check token usage in `backfill-catalog.ts` logs after a re-run — a runaway loop should hit the 50M cap; normal operation is ~3M tokens for a full catalog.
+
+### When you change `searchCatalog` or `qdrant.ts`
+- [ ] Run the smoke-search script — exercises the live Qdrant path end-to-end against a known-good 20-row corpus in an isolated collection.
+- [ ] If you change the returned columns, update `src/lib/ai/tool-labels.ts`'s `matchCount`/`extractRows` and `src/components/chat/ToolCallCard.tsx`'s `extractRows` branch so the UI still surfaces results.
+- [ ] If you change `QDRANT_COLLECTION` or dim, run `scripts/create-qdrant-collection.ts` first — it validates the existing collection matches the config and refuses to proceed on mismatch. Qdrant collections are fixed-dim at creation; a dim change requires a new collection.
+
+---
+
+## 7. UI / styling
 
 **Surface:** `src/app/globals.css`, `src/app/**/*.tsx`, `src/components/*`.
 

@@ -10,7 +10,7 @@ Catalog vectors live in a Qdrant Cloud collection. Row metadata + dedupe hash li
 |---|---|---|
 | Collection name | `olander-catalog` | `src/lib/ai/qdrant.ts` (override via `QDRANT_COLLECTION`) |
 | Type | Qdrant Cloud (managed) | — |
-| Cloud / Region | `aws` / `us-west-1` (Northern California) | (Free tier; see [History](#history) for the move off Pinecone) |
+| Cloud / Region | `aws` / `us-west-1` (Northern California) | Free tier; ~5–10 ms hop from the `sfo1` Vercel functions |
 | Storage cap | 4 GB | Free tier; ~700 MB used at 99K rows × 1024 dim |
 | Dimension | 1024 | Matches Voyage 4's shared embedding space |
 | Distance | Cosine | Voyage 4 vectors are unit-normalized |
@@ -68,7 +68,7 @@ const matches = await searchCatalogByVector(vector, 5);
 await setCatalogPayload(vectorIdFor(uid), { delete_flag: true });
 ```
 
-If you need raw client access (e.g., diagnostics, bulk delete), `getQdrantClient()` returns the `QdrantClient` directly. Qdrant filters are `must`/`must_not`/`should` arrays of `{ key, match }` / `{ key, range }` / `{ key, geo_*: …}` clauses — not the `$eq`/`$in` style Pinecone uses.
+If you need raw client access (e.g., diagnostics, bulk delete), `getQdrantClient()` returns the `QdrantClient` directly. Qdrant filters are `must`/`must_not`/`should` arrays of `{ key, match }` / `{ key, range }` / `{ key, geo_*: …}` clauses.
 
 ## Soft-delete contract
 
@@ -83,7 +83,7 @@ We do **not** hard-delete in production. Point deletion is reserved for collecti
 | `olander-catalog` | Production catalog. All `searchCatalog` queries hit this. |
 | `olander-catalog-smoke` | Created and torn down by `scripts/smoke-search-catalog.ts`. |
 
-Pinecone had a single-index-many-namespaces model; Qdrant uses separate collections for the same isolation. If Phase-2 documents land, a third collection (`olander-docs`) is the right shape — sizing and metric are likely to differ from the catalog.
+Qdrant scopes data at the collection level (no nested namespaces). If Phase-2 documents land, a third collection (`olander-docs`) is the right shape — sizing and metric are likely to differ from the catalog.
 
 ## Gotchas
 
@@ -104,19 +104,6 @@ Pinecone had a single-index-many-namespaces model; Qdrant uses separate collecti
 | `scripts/create-qdrant-collection.ts` | First-time setup. Idempotent. |
 | `scripts/backfill-catalog.ts` | Bulk-populate from P21. |
 | `scripts/sync-catalog.ts` + `src/app/api/cron/sync-catalog/route.ts` | Daily incremental + soft-delete writes. |
-| `scripts/migrate-pinecone-to-qdrant.ts` | One-time historical migration off Pinecone. Kept for reproducibility. |
-| `scripts/migrate-neon-to-pinecone.ts` | Even older — pgvector → Pinecone. Kept for the audit trail. |
 | `scripts/smoke-search-catalog.ts` | End-to-end test in the `olander-catalog-smoke` collection. |
 
 The chat-side runtime never writes — only the scripts and cron route do.
-
-## History
-
-Date: 2026-05-12.
-
-The vector store moved from **Pinecone serverless (free, AWS us-east-1)** to **Qdrant Cloud (free, AWS us-west-1)**. Reason: Pinecone's free tier is region-locked to us-east-1, which was a hard floor on the chat-path latency we couldn't lower. After the Vercel function moved to `sfo1` (West Coast) for closer-to-droplet latency, the function-to-vector hop became ~70 ms (sfo1 ↔ us-east-1). Qdrant Cloud's free tier offers AWS us-west-1 (Northern California), which is ~5–10 ms from sfo1.
-
-The Pinecone-era artifacts are kept in the repo for reproducibility, not active use:
-- `scripts/migrate-neon-to-pinecone.ts` — the pgvector → Pinecone migration (2025).
-- `scripts/migrate-pinecone-to-qdrant.ts` — this migration.
-- `src/lib/ai/pinecone.ts` — kept until the next cleanup pass; not imported by any caller. Delete when the muscle memory fades.
