@@ -5,7 +5,25 @@ import type { ChatStatus, UIMessage } from "ai";
 import { AssistantContent } from "@/components/chat/AssistantContent";
 import { isToolPart, ToolCallCard, type ToolPartLike } from "@/components/chat/ToolCallCard";
 import { summarizeToolUsageForCitation } from "@/lib/ai/tool-labels";
+import { AttachmentChip } from "./AttachmentChip";
 import { EmptyState } from "./EmptyState";
+
+type FilePart = {
+  type: "file";
+  mediaType: string;
+  url: string;
+  filename: string;
+  size?: number;
+};
+
+const isFilePart = (p: unknown): p is FilePart =>
+  typeof p === "object" &&
+  p !== null &&
+  "type" in p &&
+  (p as { type: string }).type === "file" &&
+  "url" in p &&
+  "mediaType" in p &&
+  "filename" in p;
 
 const STUCK_THRESHOLD_PX = 80;
 
@@ -121,10 +139,30 @@ function Bubble({
       .filter(isTextPart)
       .map((p) => p.text)
       .join("\n\n");
+    const userFiles = message.parts.filter(isFilePart);
     return (
       <div className="flex justify-end animate-message-in">
-        <div className="max-w-[75%] whitespace-pre-wrap rounded-2xl bg-brand-sand px-4 py-2.5 leading-relaxed text-brand-charcoal">
-          {userText}
+        <div className="flex max-w-[80%] flex-col items-end gap-2">
+          {userFiles.length > 0 && (
+            <div className="flex flex-wrap justify-end gap-2">
+              {userFiles.map((f, i) => (
+                <AttachmentChip
+                  key={`${f.url}-${i}`}
+                  filename={f.filename}
+                  mediaType={f.mediaType}
+                  size={f.size}
+                  url={f.url}
+                  variant="message"
+                  status="ready"
+                />
+              ))}
+            </div>
+          )}
+          {userText && (
+            <div className="whitespace-pre-wrap rounded-2xl bg-brand-sand px-4 py-2.5 leading-relaxed text-brand-charcoal">
+              {userText}
+            </div>
+          )}
         </div>
       </div>
     );

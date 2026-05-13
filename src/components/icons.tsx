@@ -119,3 +119,174 @@ export function CloseIcon({ className }: { className?: string } = {}) {
     </svg>
   );
 }
+
+export function PaperclipIcon({ className }: { className?: string } = {}) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M13.5 7.5l-6 6a3.5 3.5 0 1 1-5-5l6-6a2.5 2.5 0 1 1 3.5 3.5l-6 6a1.5 1.5 0 1 1-2-2l5.5-5.5" />
+    </svg>
+  );
+}
+
+export function CameraIcon({ className }: { className?: string } = {}) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M2 5.5h2l1-1.5h6l1 1.5h2v8H2z" />
+      <circle cx="8" cy="9" r="2.5" />
+    </svg>
+  );
+}
+
+// Generic document icon — folded-corner page. Used as the fallback for any
+// attachment that isn't an image / PDF / spreadsheet.
+export function DocumentIcon({ className }: { className?: string } = {}) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M3 1.5h6l3.5 3.5v9H3z" />
+      <path d="M9 1.5v3.5h3.5" />
+    </svg>
+  );
+}
+
+// Document with a small "PDF" marker — lets the chip read at a glance which
+// file kind it is without color (DESIGN.md "no second hue" rule).
+export function PdfIcon({ className }: { className?: string } = {}) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M3 1.5h6l3.5 3.5v9H3z" />
+      <path d="M9 1.5v3.5h3.5" />
+      <path d="M5.5 8.5v3M5.5 8.5h1a.8.8 0 0 1 0 1.6h-1" strokeWidth="1.2" />
+      <path d="M8.5 8.5v3M8.5 8.5h1.2M8.5 10h1" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
+// Spreadsheet icon — grid lines on a page. For xlsx/xls/csv chips.
+export function SpreadsheetIcon({ className }: { className?: string } = {}) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M3 1.5h10v13H3z" />
+      <path d="M3 5.5h10M3 9.5h10M6.5 5.5v9M9.5 5.5v9" />
+    </svg>
+  );
+}
+
+// Picture frame — used as a fallback for image chips while the thumbnail
+// is still loading (or if it fails).
+export function ImageIcon({ className }: { className?: string } = {}) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <rect x="2" y="2.5" width="12" height="11" rx="1" />
+      <circle cx="6" cy="6.5" r="1.2" />
+      <path d="M2 11l3.5-3.5L9 11l2-2 3 3" />
+    </svg>
+  );
+}
+
+// Used while a chip is in the "uploading" state. CSS spin animation is in
+// globals.css (animate-spin from Tailwind preset).
+export function SpinnerIcon({ className }: { className?: string } = {}) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="12"
+      height="12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      className={`animate-spin ${className ?? ""}`}
+      aria-hidden
+    >
+      <path d="M8 1.5a6.5 6.5 0 1 1-6.5 6.5" />
+    </svg>
+  );
+}
+
+// Used in the chip "error" state.
+export function AlertIcon({ className }: { className?: string } = {}) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="12"
+      height="12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <circle cx="8" cy="8" r="6.5" />
+      <path d="M8 5v3.5" />
+      <circle cx="8" cy="11" r="0.4" fill="currentColor" />
+    </svg>
+  );
+}
