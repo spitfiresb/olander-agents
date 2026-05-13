@@ -110,6 +110,8 @@ function DetailGrid({
     top?: number;
     skip?: number;
     select?: string | string[];
+    query?: string;
+    topK?: number;
   };
 
   const rows: Array<[string, string]> = [];
@@ -126,6 +128,9 @@ function DetailGrid({
     if (i.area) rows.push(["Area", i.area]);
     if (i.resource) rows.push(["Resource", i.resource]);
     if (i.id) rows.push(["ID", i.id]);
+  } else if (toolName === "searchCatalog") {
+    if (i.query) rows.push(["Query", i.query]);
+    if (i.topK != null) rows.push(["Top K", String(i.topK)]);
   } else {
     try {
       rows.push(["Input", JSON.stringify(input)]);
@@ -233,6 +238,17 @@ function extractRows(output: unknown): Record<string, unknown>[] | null {
       );
     }
   }
+  // searchCatalog returns { matches: [...] } rather than { rows }. Surface
+  // the candidate list in the same expandable table the other tools use.
+  if (output && typeof output === "object" && "matches" in output) {
+    const m = (output as { matches?: unknown }).matches;
+    if (Array.isArray(m)) {
+      return m.filter(
+        (row): row is Record<string, unknown> =>
+          typeof row === "object" && row !== null,
+      );
+    }
+  }
   return null;
 }
 
@@ -264,6 +280,10 @@ function errorCodeToLabel(code: string): string {
       return "P21 upstream timed out";
     case "bad_view_name":
       return "Unsupported P21 view";
+    case "search_not_configured":
+      return "Catalog search not configured";
+    case "search_failed":
+      return "Catalog search failed";
     default:
       return "Lookup failed";
   }

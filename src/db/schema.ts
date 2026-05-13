@@ -6,8 +6,15 @@ import {
   primaryKey,
   jsonb,
   index,
+  boolean,
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
+
+// Catalog vectors live in Pinecone now, not Postgres — see RETRIEVAL.md
+// § Vector store for the history (hit Neon Free's 512 MB at 36K rows; split
+// stack moves the binding constraint off the shared app DB). The pgvector
+// extension stays enabled on Neon (no-op cost) in case future smaller
+// indexes want it back.
 
 // Kept as text rather than pgEnum so adding tiers later is a no-op migration.
 // Olander hasn't finalized access tiers yet (open question in README).
@@ -112,6 +119,36 @@ export const messages = pgTable(
   },
   (t) => [index("msg_conv_created_idx").on(t.conversationId, t.createdAt)],
 );
+
+// Catalog row metadata — one row per inv_mast_uid mirroring p21_view_inv_mast.
+// The actual vector lives in Pinecone (see src/lib/ai/pinecone.ts) keyed on
+// the same inv_mast_uid. This table carries:
+//   - `embed_input_hash`: dedupe key for backfill / sync. Same text ⇒ same
+//     hash ⇒ no re-embed, no Pinecone re-upsert.
+//   - the descriptive fields: source of truth for any callers that need the
+//     full row without a Pinecone fetch (audit, exports, future joins).
+// `embeddedAt` records when we last pushed this row's vector to Pinecone.
+export const catalogItem = pgTable("catalog_item", {
+  invMastUid: integer("inv_mast_uid").primaryKey(),
+  // NOT unique. Olander's P21 has duplicate item_ids across inv_mast_uids —
+  // typically multi-company catalogs that mint internal SKU numbers per
+  // company, which can collide across companies (real example: 597906
+  // showed up in two different inv_mast_uids during the 2026-05-12
+  // backfill). inv_mast_uid is the only stable unique key.
+  itemId: text("item_id").notNull(),
+  itemDesc: text("item_desc"),
+  extendedDesc: text("extended_desc"),
+  salesPricingUnit: text("sales_pricing_unit"),
+  deleteFlag: boolean("delete_flag").notNull().default(false),
+  sourceModifiedAt: timestamp("source_modified_at", {
+    withTimezone: true,
+    mode: "date",
+  }),
+  embedInputHash: text("embed_input_hash").notNull(),
+  embeddedAt: timestamp("embedded_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+});
 
 // Flattened audit log of tool calls — denormalized from messages.parts so
 // /admin/audit can grep without loading every assistant message.

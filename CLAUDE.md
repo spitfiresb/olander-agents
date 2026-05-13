@@ -17,7 +17,13 @@ This version has breaking changes — APIs, conventions, and file structure may 
 ### Database (Neon Postgres + Drizzle + Auth.js adapter)
 
 - **Connection topology, schema, migration workflow, history of the Vercel-Neon consolidation**: `docs/db.md`. Read before touching `src/db/`, `drizzle/`, or anything that talks to Postgres. Especially: there is exactly **one** Neon project (`<neon-project-id>`, Vercel-managed) — do not create a second one.
-- **Tables**: `src/db/schema.ts` carries the Auth.js adapter tables (`user`, `account`, `session`, `verificationToken`) plus chat persistence (`conversation`, `message`, `toolCall`). All chat-table reads/writes go through `src/lib/conversations.ts`, which enforces per-user ownership — never query the chat tables with an externally supplied id directly.
+- **Tables**: `src/db/schema.ts` carries the Auth.js adapter tables (`user`, `account`, `session`, `verificationToken`), chat persistence (`conversation`, `message`, `toolCall`), and the catalog row metadata (`catalog_item` — text + dedupe hash, no vector column; the vectors live in Qdrant — see Vector store below). All chat-table reads/writes go through `src/lib/conversations.ts`, which enforces per-user ownership — never query the chat tables with an externally supplied id directly.
+
+### Vector store (Qdrant Cloud, AWS us-west-1)
+
+- **Reference** (point shape, operations, payload schema, filter syntax, gotchas): `docs/Vector_Store.md` — read before writing any code that talks to Qdrant or touches `src/lib/ai/qdrant.ts`.
+- **Why it lives outside Neon**: vector storage and user/chat-table storage have different growth curves; splitting them keeps Neon's scaling pressure on user-shaped data instead of a runaway catalog (or future doc-chunk) index eating the same disk.
+- **Operations** (backfill, sync, smoke test, runbook): `docs/Retrieval_Runbook.md`.
 
 ### Tests
 Run with `npm test`. Unit tests live in `src/**/__tests__/`. Keep test targets pure — `src/lib/auth-allowlist.ts` exists because `src/auth.ts` pulls in `next-auth`, which Vitest can't load without an environment shim.
