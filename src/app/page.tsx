@@ -4,6 +4,13 @@ import { SignInPanel } from "./SignInPanel";
 export default function Home() {
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden bg-brand-canvas">
+      {/* Warm the connection to Microsoft's sign-in host while the user is
+          still looking at the sign-in screen. By the time they click,
+          DNS + TCP + TLS are already done — the cross-origin nav after the
+          paint animation lands ~100–250ms faster. Hoisted into <head> by
+          Next.js's resource-hint handling. */}
+      <link rel="dns-prefetch" href="https://login.microsoftonline.com" />
+      <link rel="preconnect" href="https://login.microsoftonline.com" crossOrigin="anonymous" />
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-2/3"
