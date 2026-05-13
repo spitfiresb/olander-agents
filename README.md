@@ -11,9 +11,10 @@ See `VISION.md` for the product framing and `DESIGN.md` for the visual system.
 - **Frontend**: Next.js 16 App Router on Vercel. Streaming chat UI with
   markdown rendering, inline tool-call cards, and result tables.
 - **Auth**: Microsoft Entra ID via Auth.js v5. Tenant-gated to Olander's
-  directory; domain-gated to `olander.com`.
+  directory; access is then per-email via a `member` allowlist managed in
+  `/admin` (tiers: `user` / `admin` / `revoked`).
 - **DB**: Neon Postgres (Vercel-managed). One project (`<neon-project-id>`).
-  Tables: Auth.js adapter tables + `conversation`, `message`, `toolCall`.
+  Tables: Auth.js adapter tables + `member` + `conversation`, `message`, `toolCall`.
 - **LLM**: Anthropic Claude Sonnet 4.6 via `@ai-sdk/anthropic`. System prompt
   marked for ephemeral cache; tool calls run via the AI SDK tool loop.
 - **P21 path**: Vercel → DigitalOcean droplet proxy (Reserved IP whitelisted
@@ -37,7 +38,8 @@ Required env vars in `.env.local`:
 | `AUTH_MICROSOFT_ENTRA_ID_ID` | App registration client id |
 | `AUTH_MICROSOFT_ENTRA_ID_SECRET` | App registration client secret |
 | `AUTH_MICROSOFT_ENTRA_ID_ISSUER` | `https://login.microsoftonline.com/<tenant-id>/v2.0` |
-| `AUTH_ALLOWED_TENANT_IDS` | Comma-separated Entra tenant GUIDs |
+| `AUTH_ALLOWED_TENANT_IDS` | Comma-separated Entra tenant GUIDs (empty ⇒ no sign-ins) |
+| `AUTH_BOOTSTRAP_ADMINS` | Comma-separated emails — always allowed, always admin (break-glass / first admin) |
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `DROPLET_PROXY_URL` | `https://egress.<domain>` |
 | `DROPLET_PROXY_TOKEN` | Shared bearer for the proxy |
@@ -64,9 +66,15 @@ Dev-only:
 
 ## Who can sign in
 
-Domain allowlist is `olander.com` (`src/lib/auth-allowlist.ts`). Tenant ID
-allowlist is `AUTH_ALLOWED_TENANT_IDS`. **Both must match.** The tenant check
-runs first; an empty `AUTH_ALLOWED_TENANT_IDS` fails closed (no sign-ins).
+Two gates, **both must pass** (`src/auth.ts` `signIn`):
+
+1. **Entra tenant** — the token's `tid` must be in `AUTH_ALLOWED_TENANT_IDS`
+   (`src/lib/auth-allowlist.ts`). Runs first; empty fails closed (no sign-ins).
+2. **Per-email** — a non-`revoked` row in the `member` table, *or* the email is
+   in `AUTH_BOOTSTRAP_ADMINS` (`src/lib/members.ts`). Members are managed at
+   `/admin/members`; tiers are `user` / `admin` / `revoked`. `user.role` is
+   reconciled from `member.role` on every login. See `docs/db.md` →
+   "Sign-in allowlist" and `docs/Runbook.md` → "Managing who can sign in".
 
 ## Where prod lives
 

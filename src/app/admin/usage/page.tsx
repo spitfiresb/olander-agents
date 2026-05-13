@@ -1,6 +1,7 @@
 import { redirect, notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { dailyUsage } from "@/lib/conversations";
+import { BackLink } from "@/components/BackLink";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,8 @@ export default async function UsagePage() {
   return (
     <div className="min-h-dvh bg-brand-canvas">
       <div className="mx-auto max-w-3xl px-6 py-10">
-        <h1 className="text-2xl font-semibold text-brand-charcoal">Token usage</h1>
+        <BackLink href="/admin">Back to admin</BackLink>
+        <h1 className="mt-4 text-2xl font-semibold text-brand-charcoal">Token usage</h1>
         <p className="mt-2 text-sm text-brand-ink-soft">
           Last 30 days of assistant turns, grouped by date. Cost estimates
           use Anthropic public pricing for Sonnet 4.6 at the time this page

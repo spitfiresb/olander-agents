@@ -1,4 +1,4 @@
-import { auth } from "@/auth";
+import { activeSession } from "@/auth";
 import {
   getConversation,
   loadMessages,
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function GET(_req: Request, ctx: Ctx) {
-  const session = await auth();
+  const session = await activeSession();
   if (!session?.user) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -23,7 +23,7 @@ export async function GET(_req: Request, ctx: Ctx) {
 }
 
 export async function PATCH(req: Request, ctx: Ctx) {
-  const session = await auth();
+  const session = await activeSession();
   if (!session?.user) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -44,7 +44,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
 }
 
 export async function DELETE(_req: Request, ctx: Ctx) {
-  const session = await auth();
+  const session = await activeSession();
   if (!session?.user) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }

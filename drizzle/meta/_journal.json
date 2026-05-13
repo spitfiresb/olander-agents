@@ -15,6 +15,13 @@
       "when": 1778523624253,
       "tag": "0001_nebulous_thunderbolt",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778634722256,
+      "tag": "0002_special_lester",
+      "breakpoints": true
     }
   ]
 }

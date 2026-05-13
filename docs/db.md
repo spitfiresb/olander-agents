@@ -37,19 +37,37 @@ Vercel sets `DATABASE_URL` plus a few aliases (`POSTGRES_URL`, `POSTGRES_URL_NON
 
 ## Schema
 
-Defined in `src/db/schema.ts`. Four tables, all in the `public` schema:
+Defined in `src/db/schema.ts`. Core tables (the chat-persistence tables — `conversation`, `message`, `toolCall` — are also in `schema.ts`; see CLAUDE.md), all in the `public` schema:
 
 | Table | Purpose |
 |---|---|
-| `user` | One row per signed-in human. Includes a `role` column (`'admin' \| 'user'`) for tier gating |
+| `user` | One row per signed-in human. `role` (`'admin' \| 'user' \| 'revoked'`) drives tier gating; it is *reconciled from* `member.role` on every login (see [Sign-in allowlist](#sign-in-allowlist)) — `member` is the source of truth |
 | `account` | OAuth provider linkage (Microsoft Entra today). Composite PK on `(provider, providerAccountId)` |
 | `session` | DB-backed session tokens (we use the database session strategy, not JWT) |
 | `verificationToken` | Magic-link / email verification tokens. Unused with Entra-only sign-in but the adapter requires the table |
+| `member` | Sign-in allowlist: one row per email permitted to sign in, plus its tier. PK on `email` (lowercased). `addedBy` = the admin's `user.id` (null for migration-seeded/backfilled rows; not an FK on purpose). Reads/writes via `src/lib/members.ts`; managed at `/admin/members`. See [Sign-in allowlist](#sign-in-allowlist) |
 
 Two intentional design calls worth knowing:
 
-- **`role` is `text`, not `pgEnum`.** Adding new tiers later (e.g., `viewer`, `auditor`) becomes a code change with no DDL migration. `Role` is exported as a TS union from `schema.ts` for type-safety in app code.
+- **`role` is `text`, not `pgEnum`.** Adding tiers is a code change with no DDL migration — adding `revoked` was exactly this (only the new `member` table needed a migration). `Role` is exported as a TS union from `schema.ts` for type-safety in app code.
 - **`emailVerified` is left null for OAuth users.** Auth.js stamps that column only for the magic-link/email flow. Entra has already verified the user's email before issuing the OAuth token, so the null is expected. Don't write app code that gates on `if (user.emailVerified)`.
+
+## Sign-in allowlist
+
+Who may sign in is two gates, both required (see `src/auth.ts` `signIn` callback):
+
+1. **Entra tenant (`tid`) check** — `AUTH_ALLOWED_TENANT_IDS`. The cryptographic boundary; `tid` is bound to Microsoft's per-tenant signing key. Empty ⇒ fails closed. Lives in `src/lib/auth-allowlist.ts` (kept pure for unit tests).
+2. **Per-email membership** — a row in the `member` table whose `role` is not `revoked`, *or* the email is in `AUTH_BOOTSTRAP_ADMINS` (a comma-separated env var of always-allowed/always-admin emails — first-admin bootstrap + break-glass; see `.env.example`). Lives in `src/lib/members.ts`.
+
+Tiers (`member.role`, mirrored onto `user.role`):
+
+- `user` — normal access.
+- `admin` — also sees `/admin/*` (audit, usage, members).
+- `revoked` — blocked from everything: `signIn` denies them, and setting `revoked` (the "Remove user" button in `/admin/members`) immediately deletes their `session` rows so any live session ends now. Their `user` row, conversations, and tool-call audit history are kept. The row stays in the table but is hidden from `/admin/members` — re-add the email there to restore access (`addMember` upserts). `src/auth.ts` exports `activeSession()` (= `auth()` but returns null for `revoked`) which the chat pages/routes use as a backstop for the revoke-vs-session-delete race window.
+
+`events.signIn` in `src/auth.ts` reconciles `user.role` from `member.role` on **every** login — the adapter creates a new `user` row with the schema default (`user`), so this is what actually applies an `admin` tier to someone an admin invited before they ever signed in, and it self-heals after any later tier change.
+
+The `0002` migration creates `member`, backfills it from existing `user` rows (so nobody currently signed in is locked out by the switch from a domain allowlist), and seeds the project owners as bootstrap admins. Verify with `SELECT email, role FROM member ORDER BY "createdAt"`.
 
 ### The `neon_auth` schema (Vercel integration extra)
 
@@ -154,6 +172,8 @@ Files to read for more depth:
 
 - `src/db/schema.ts` — table definitions
 - `src/db/index.ts` — Drizzle client setup (HTTP driver via `@neondatabase/serverless`)
-- `src/auth.ts` — Auth.js config + Drizzle adapter wiring
+- `src/auth.ts` — Auth.js config + Drizzle adapter wiring + `events.signIn` reconciler + `activeSession()`
+- `src/lib/members.ts` — `member`-table reads/writes + the sign-in membership check
+- `src/lib/auth-allowlist.ts` — pure tenant check + email normalization (unit-tested)
 - `drizzle.config.ts` — drizzle-kit config (reads `.env.local`)
 - `drizzle/0000_talented_invisible_woman.sql` — initial schema as applied SQL

@@ -48,13 +48,28 @@ Migrations live in `drizzle/`. Always commit the matching `drizzle/meta/_journal
 Note: when `P21_CONSUMER_KEY` is set, `P21_USERNAME` / `P21_PASSWORD` are
 ignored. Remove the username/password after switchover.
 
-## Adding an allowed sign-in domain
+## Managing who can sign in (members)
 
-Edit `ALLOWED_DOMAINS` in `src/lib/auth-allowlist.ts`. Ship a deploy. Then:
-- If the new domain belongs to a different Entra tenant, also add the
-  tenant GUID to `AUTH_ALLOWED_TENANT_IDS` in Vercel env vars.
-- An empty `AUTH_ALLOWED_TENANT_IDS` fails closed — verify it's still
-  populated after any env change.
+Access is per-email, controlled in the app — no deploy needed.
+
+- **Add / re-invite:** sign in as an admin → `/admin` → **Members** → enter an
+  email, pick `User` or `Admin`, **Add member**. Inviting someone before they've
+  ever signed in works — the tier you pick is applied on their first login.
+  Re-adding an email that was removed earlier re-invites them.
+- **Change tiers:** flip the per-row `User`/`Admin` toggle(s), then **Save
+  changes** (top-right of the table). Nothing is written until you click Save.
+- **Remove:** the red **Remove user** button on a row — they're signed out and
+  lose all access immediately; their account and chat history are kept and they
+  drop off the list. Re-add the email to restore them.
+- **Break-glass / first admin:** `AUTH_BOOTSTRAP_ADMINS` in Vercel env vars —
+  comma-separated emails that are always allowed and always admin regardless of
+  the table. Keep it to 1-2 trusted accounts.
+- **A new Entra tenant:** the sign-in still requires a matching `tid`, so add the
+  tenant GUID to `AUTH_ALLOWED_TENANT_IDS` in Vercel env vars. An empty
+  `AUTH_ALLOWED_TENANT_IDS` fails closed — verify it's still populated after any
+  env change.
+- A non-allowed (or revoked) account sent to sign in lands on the branded
+  `/auth/error` page.
 
 ## Reading logs
 
