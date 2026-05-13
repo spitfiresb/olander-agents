@@ -1,6 +1,6 @@
 {
-  "id": "409b72c8-ea63-49d8-86a1-9f3de7b52332",
-  "prevId": "845148ab-0387-430e-a2f1-34ed7baa116c",
+  "id": "66c5c5b9-ef89-45c5-bc4d-f0a8ec840cd3",
+  "prevId": "2be9d197-3ac9-42d6-9794-499517c7f6e1",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -158,12 +158,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "embedding": {
-          "name": "embedding",
-          "type": "vector(1024)",
-          "primaryKey": false,
-          "notNull": true
-        },
         "embedded_at": {
           "name": "embedded_at",
           "type": "timestamp with time zone",
@@ -175,15 +169,7 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "catalog_item_item_id_unique": {
-          "name": "catalog_item_item_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "item_id"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

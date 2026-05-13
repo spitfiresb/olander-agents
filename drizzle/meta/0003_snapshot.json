@@ -1,6 +1,6 @@
 {
-  "id": "409b72c8-ea63-49d8-86a1-9f3de7b52332",
-  "prevId": "845148ab-0387-430e-a2f1-34ed7baa116c",
+  "id": "2be9d197-3ac9-42d6-9794-499517c7f6e1",
+  "prevId": "409b72c8-ea63-49d8-86a1-9f3de7b52332",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -155,12 +155,6 @@
         "embed_input_hash": {
           "name": "embed_input_hash",
           "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "embedding": {
-          "name": "embedding",
-          "type": "vector(1024)",
           "primaryKey": false,
           "notNull": true
         },

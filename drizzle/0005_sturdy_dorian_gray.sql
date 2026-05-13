@@ -1,4 +1,7 @@
-CREATE TABLE "member" (
+-- IF NOT EXISTS: the original `0002_special_lester` (since renumbered to this
+-- file post-merge) was already applied to the shared Neon DB, so the table
+-- exists there. Idempotent CREATE keeps this safe to re-run anywhere.
+CREATE TABLE IF NOT EXISTS "member" (
 	"email" text PRIMARY KEY NOT NULL,
 	"role" text DEFAULT 'user' NOT NULL,
 	"addedBy" text,
