@@ -17,7 +17,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 ### Database (Neon Postgres + Drizzle + Auth.js adapter)
 
 - **Connection topology, schema, migration workflow, history of the Vercel-Neon consolidation**: `docs/db.md`. Read before touching `src/db/`, `drizzle/`, or anything that talks to Postgres. Especially: there is exactly **one** Neon project (`<neon-project-id>`, Vercel-managed) — do not create a second one.
-- **Tables**: `src/db/schema.ts` carries the Auth.js adapter tables (`user`, `account`, `session`, `verificationToken`), chat persistence (`conversation`, `message`, `toolCall`), and the catalog row metadata (`catalog_item` — text + dedupe hash, no vector column; the vectors live in Qdrant — see Vector store below). All chat-table reads/writes go through `src/lib/conversations.ts`, which enforces per-user ownership — never query the chat tables with an externally supplied id directly.
+- **Tables**: `src/db/schema.ts` carries the Auth.js adapter tables (`user`, `account`, `session`, `verificationToken`), the sign-in allowlist (`member` — who may sign in + their tier `admin`/`user`/`revoked`; reads/writes via `src/lib/members.ts`, managed at `/admin/members`), chat persistence (`conversation`, `message`, `toolCall`), and the catalog row metadata (`catalog_item` — text + dedupe hash, no vector column; the vectors live in Qdrant — see Vector store below). All chat-table reads/writes go through `src/lib/conversations.ts`, which enforces per-user ownership — never query the chat tables with an externally supplied id directly.
 
 ### Vector store (Qdrant Cloud, AWS us-west-1)
 

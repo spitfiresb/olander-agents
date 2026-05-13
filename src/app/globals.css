@@ -25,6 +25,25 @@ body {
   font-family: var(--font-brand);
 }
 
+/* Clickable controls get the hand cursor. Browsers don't set this on <button>
+   by default, and Tailwind v4's Preflight doesn't either — so without this
+   most buttons show the arrow cursor, and it flickers as the pointer moves
+   between a button and an adjacent link or text. Disabled controls get
+   not-allowed. In @layer base so per-element `cursor-*` utilities still win. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  label[for],
+  summary {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [role="button"][aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}
+
 @keyframes message-fade-up {
   from {
     opacity: 0;

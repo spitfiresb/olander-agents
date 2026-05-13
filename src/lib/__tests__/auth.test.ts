@@ -1,95 +1,113 @@
 import { describe, expect, test } from "vitest";
-import { isAllowedDomain, evaluateSignIn } from "@/lib/auth-allowlist";
+import {
+  evaluateTenant,
+  normalizeEmail,
+  parseBootstrapAdmins,
+} from "@/lib/auth-allowlist";
 
 const OLANDER_TID = "00000000-0000-0000-0000-000000000001";
 
-describe("isAllowedDomain", () => {
-  test("accepts olander.com", () => {
-    expect(isAllowedDomain("rep@example.com")).toBe(true);
+describe("normalizeEmail", () => {
+  test("lowercases and trims", () => {
+    expect(normalizeEmail("  Rep@UOREGON.edu  ")).toBe("rep@uoregon.edu");
   });
 
-  test("accepts uoregon.edu", () => {
-    expect(isAllowedDomain("dev@uoregon.edu")).toBe(true);
-  });
-
-  test("rejects unknown domains", () => {
-    expect(isAllowedDomain("rep@example.com")).toBe(false);
-    expect(isAllowedDomain("rep@example.co")).toBe(false);
-  });
-
-  test("is case-insensitive", () => {
-    expect(isAllowedDomain("Rep@EXAMPLE.COM")).toBe(true);
-  });
-
-  test("rejects empty / nullish", () => {
-    expect(isAllowedDomain(null)).toBe(false);
-    expect(isAllowedDomain(undefined)).toBe(false);
-    expect(isAllowedDomain("")).toBe(false);
-  });
-
-  test("does not accept substring matches without @", () => {
-    expect(isAllowedDomain("reolander.com")).toBe(false);
+  test("is idempotent on an already-normalized address", () => {
+    expect(normalizeEmail("rep@example.com")).toBe("rep@example.com");
   });
 });
 
-describe("evaluateSignIn", () => {
-  test("rejects when tenant allowlist is empty (fail closed)", () => {
+describe("parseBootstrapAdmins", () => {
+  test("returns [] for unset / empty / whitespace", () => {
+    expect(parseBootstrapAdmins(undefined)).toEqual([]);
+    expect(parseBootstrapAdmins(null)).toEqual([]);
+    expect(parseBootstrapAdmins("")).toEqual([]);
+    expect(parseBootstrapAdmins("   ")).toEqual([]);
+  });
+
+  test("splits, normalizes, and drops empty entries", () => {
+    expect(parseBootstrapAdmins("A@x.com, b@Y.com ,,  c@z.com ")).toEqual([
+      "a@x.com",
+      "b@y.com",
+      "c@z.com",
+    ]);
+  });
+});
+
+describe("evaluateTenant", () => {
+  test("fails closed when the tenant allowlist is empty", () => {
     expect(
-      evaluateSignIn(
+      evaluateTenant(
         { tid: OLANDER_TID, email: "rep@example.com" },
         { allowedTenantIds: [] },
       ),
-    ).toBe(false);
+    ).toEqual({ ok: false, email: null });
   });
 
-  test("rejects when tenant id is wrong", () => {
+  test("rejects a wrong tenant id even with a fine email", () => {
     expect(
-      evaluateSignIn(
+      evaluateTenant(
         { tid: "wrong-tid", email: "rep@example.com" },
         { allowedTenantIds: [OLANDER_TID] },
       ),
-    ).toBe(false);
+    ).toEqual({ ok: false, email: null });
   });
 
-  test("rejects right tenant but wrong domain (spoofed email)", () => {
+  test("rejects a missing tid claim", () => {
     expect(
-      evaluateSignIn(
-        { tid: OLANDER_TID, email: "spoof@example.com" },
-        { allowedTenantIds: [OLANDER_TID] },
-      ),
-    ).toBe(false);
-  });
-
-  test("accepts right tenant + right domain", () => {
-    expect(
-      evaluateSignIn(
-        { tid: OLANDER_TID, email: "rep@example.com" },
-        { allowedTenantIds: [OLANDER_TID] },
-      ),
-    ).toBe(true);
-  });
-
-  test("rejects when tid claim is missing", () => {
-    expect(
-      evaluateSignIn(
+      evaluateTenant(
         { email: "rep@example.com" },
         { allowedTenantIds: [OLANDER_TID] },
       ),
-    ).toBe(false);
+    ).toEqual({ ok: false, email: null });
   });
 
-  test("rejects when tid claim is the wrong type", () => {
+  test("rejects a wrong-type tid claim", () => {
     expect(
-      evaluateSignIn(
+      evaluateTenant(
         { tid: 12345, email: "rep@example.com" },
         { allowedTenantIds: [OLANDER_TID] },
       ),
-    ).toBe(false);
+    ).toEqual({ ok: false, email: null });
   });
 
-  test("rejects nullish profile", () => {
+  test("rejects a nullish profile", () => {
     expect(
-      evaluateSignIn(null, { allowedTenantIds: [OLANDER_TID] }),
-    ).toBe(false);
+      evaluateTenant(null, { allowedTenantIds: [OLANDER_TID] }),
+    ).toEqual({ ok: false, email: null });
+  });
+
+  test("rejects the right tenant with a missing or non-string email", () => {
+    expect(
+      evaluateTenant({ tid: OLANDER_TID }, { allowedTenantIds: [OLANDER_TID] }),
+    ).toEqual({ ok: false, email: null });
+    expect(
+      evaluateTenant(
+        { tid: OLANDER_TID, email: 42 },
+        { allowedTenantIds: [OLANDER_TID] },
+      ),
+    ).toEqual({ ok: false, email: null });
+  });
+
+  test("accepts the right tenant and returns the normalized email", () => {
+    expect(
+      evaluateTenant(
+        { tid: OLANDER_TID, email: "  Rep@Example.com " },
+        { allowedTenantIds: [OLANDER_TID] },
+      ),
+    ).toEqual({ ok: true, email: "rep@example.com" });
+  });
+
+  // evaluateTenant deliberately does NOT check the email domain anymore — the
+  // membership lookup in src/auth.ts (the `member` table) is the email gate. A
+  // non-Olander address passes this stage; isAllowedMember is what rejects it.
+  // Don't "fix" this back into a domain assertion.
+  test("does not gate on email domain (membership check does that)", () => {
+    expect(
+      evaluateTenant(
+        { tid: OLANDER_TID, email: "someone@example.com" },
+        { allowedTenantIds: [OLANDER_TID] },
+      ),
+    ).toEqual({ ok: true, email: "someone@example.com" });
   });
 });

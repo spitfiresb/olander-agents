@@ -1,5 +1,5 @@
 import { redirect, notFound } from "next/navigation";
-import { auth } from "@/auth";
+import { activeSession } from "@/auth";
 import { ChatShell } from "../ChatShell";
 import { loadMessages, getConversation } from "@/lib/conversations";
 import type { UIMessage } from "ai";
@@ -7,7 +7,7 @@ import type { UIMessage } from "ai";
 type Props = { params: Promise<{ id: string }> };
 
 export default async function ConversationPage({ params }: Props) {
-  const session = await auth();
+  const session = await activeSession();
   if (!session?.user) redirect("/");
 
   const { id } = await params;

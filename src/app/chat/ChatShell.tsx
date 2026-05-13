@@ -191,8 +191,8 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
         {/* Mobile / tablet top bar (hidden on lg+) */}
         <header className="flex h-14 shrink-0 items-center gap-2 bg-brand-charcoal px-3 lg:hidden">
           <Link
-            href="/"
-            aria-label="Olander Agents — back to home"
+            href="/chat"
+            aria-label="Olander Agents — chat home"
             className="rounded-sm transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal"
           >
             <Wordmark variant="topbar" />

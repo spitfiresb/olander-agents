@@ -16,9 +16,11 @@ import type { AdapterAccountType } from "next-auth/adapters";
 // extension stays enabled on Neon (no-op cost) in case future smaller
 // indexes want it back.
 
-// Kept as text rather than pgEnum so adding tiers later is a no-op migration.
-// Olander hasn't finalized access tiers yet (open question in README).
-export type Role = "admin" | "user";
+// Kept as text rather than pgEnum so adding tiers is a no-op migration — adding
+// `revoked` here required zero schema change (the new `member` table did need
+// one). `revoked` = blocked from everything, but the user's row and chat
+// history are kept; see src/lib/members.ts and the `member` table below.
+export type Role = "admin" | "user" | "revoked";
 
 export const users = pgTable("user", {
   id: text("id")
@@ -70,6 +72,24 @@ export const verificationTokens = pgTable(
   },
   (vt) => [primaryKey({ columns: [vt.identifier, vt.token] })]
 );
+
+// Sign-in allowlist. One row per email that is permitted to sign in, plus the
+// tier they get. This is the source of truth that the `signIn` callback checks
+// (src/auth.ts) and that the rest of the app's `user.role` is reconciled from
+// on every login. A `member` row is required to sign in *and* the Entra `tid`
+// claim must match (see src/lib/auth-allowlist.ts). `email` is stored
+// lowercased/trimmed. `addedBy` is the admin's user.id (null for rows
+// backfilled or seeded by a migration); deliberately NOT a FK so removing an
+// admin doesn't cascade-delete the audit of who added whom. Managed at
+// /admin/members. See docs/db.md.
+export const members = pgTable("member", {
+  email: text("email").primaryKey(),
+  role: text("role").$type<Role>().notNull().default("user"),
+  addedBy: text("addedBy"),
+  createdAt: timestamp("createdAt", { mode: "date", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
 
 // --- Chat persistence (TODO §3) --------------------------------------------
 // One row per chat. `deletedAt` is the soft-delete tombstone; reads filter on

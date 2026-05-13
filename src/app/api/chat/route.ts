@@ -1,6 +1,6 @@
 import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from "ai";
 import { z } from "zod";
-import { auth } from "@/auth";
+import { activeSession } from "@/auth";
 import {
   getModel,
   MODEL_MAX_OUTPUT_TOKENS,
@@ -69,7 +69,7 @@ export async function POST(req: Request) {
   // mean "ignore a real signed-in user", or persistence silently no-ops
   // whenever ALLOW_UNAUTHED_DEV is set even for users who are signed in.
   let userId: string | null = null;
-  const session = await auth();
+  const session = await activeSession();
   if (session?.user) {
     userId = session.user.id ?? session.user.email ?? null;
   } else if (!devBypass) {

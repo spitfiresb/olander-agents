@@ -15,30 +15,39 @@ Update this file when a new class of regression bites us. Promote sections up th
 
 ## 1. Auth (highest historical regression rate — 5 fix commits - can be skipped in dev, never in production builds)
 
-**Surface:** `src/auth.ts`, `src/app/auth/error/`, `src/app/api/auth/[...nextauth]/`, `src/app/SignInPanel.tsx`.
+**Surface:** `src/auth.ts`, `src/lib/auth-allowlist.ts`, `src/lib/members.ts`, `src/app/admin/members/`, `src/app/auth/error/`, `src/app/api/auth/[...nextauth]/`, `src/app/SignInPanel.tsx`.
 
-**Why it tops the list:** Auth glues Microsoft Entra ID, env vars, a domain+tenant allowlist, and the Drizzle adapter together. Every one of those joints has caused a real regression.
+**Why it tops the list:** Auth glues Microsoft Entra ID, env vars, the tenant check + the `member` allowlist, and the Drizzle adapter together. Every one of those joints has caused a real regression.
 
 ### Smoke check
 - [ ] Signed out, visit `/chat` → blocked / redirected to sign-in.
-- [ ] Sign in with an allowlisted @olander.com or @uoregon.edu account → lands on `/chat`.
-- [ ] Sign in with a non-allowed domain → lands on `/auth/error` with the branded page, not the default Auth.js page.
+- [ ] Sign in with an account that has a non-`revoked` `member` row (or is in `AUTH_BOOTSTRAP_ADMINS`) → lands on `/chat`.
+- [ ] Sign in with an account that is **not** in `member` and not a bootstrap admin → lands on `/auth/error` with the branded page, not the default Auth.js page.
 - [ ] Sign out from the account menu → signed-out surface, `/chat` is blocked again.
 - [ ] Microsoft sign-in prompts the account picker every time (not silent SSO into a random cached account).
+- [ ] As an admin, `/admin/members`: add an email → it appears; flip a `User`/`Admin` toggle → "Save changes" turns red, click it → tier persists; "Remove user" → that user's `session` rows are gone, they're bounced to `/auth/error`, and the row disappears; re-add the same email → they're back and can sign in again. `AUTH_BOOTSTRAP_ADMINS` accounts work even with an empty `member` table. (`/api/dev/sign-in` bypasses the `signIn` gate + `events.signIn` — it exercises the admin actions and session-killing, not the gate; the gate is covered by `npm test`.)
 
 ### Things that have actually broken
 - **Wrong Entra env var name** (6d6c191) — using `AUTH_MICROSOFT_ENTRA_ID_TENANT_ID` instead of `..._ISSUER`. Auth silently 500s. Verify all Entra env names match what `next-auth/providers/microsoft-entra-id` actually reads.
-- **Email-suffix-only allowlist let a foreign tenant spoof @olander.com** (12ce16f) — `profile.email` is operator-settable. Always gate on `profile.tid` first, *then* domain.
-- **`ALLOWED_TENANT_IDS` empty fails closed** (intentional, 12ce16f) — but that means an unset env var silently breaks all sign-ins. Confirm it's populated in every environment you deploy to.
+- **Email-suffix-only allowlist let a foreign tenant spoof @olander.com** (12ce16f) — `profile.email` is operator-settable. Always gate on `profile.tid` first, *then* the email check. (`evaluateTenant` now deliberately does **not** check the email domain — the `member`-table membership check is the email gate. Don't re-add a domain assertion thinking it's a regression.)
+- **`AUTH_ALLOWED_TENANT_IDS` empty fails closed** (intentional, 12ce16f) — but that means an unset env var silently breaks all sign-ins. Confirm it's populated in every environment you deploy to.
 - **Without `prompt: select_account`** (48c191f), MS silently reuses the browser's cached account and the user gets Access Denied with no way to switch.
-- **Allowlist scoping mistakes** (6558955) — broadened from named emails to a whole domain by accident. Re-read `ALLOWED_DOMAINS` after any change to the signIn callback.
+- **Domain → per-email allowlist migration** — the `0002` migration backfills `member` from existing `user` rows + seeds bootstrap admins; an empty `member` table on a fresh deploy locks everyone out except `AUTH_BOOTSTRAP_ADMINS`.
 
 ### When you change `src/auth.ts`
-- [ ] Tenant ID check still runs **before** the domain check.
-- [ ] Empty `ALLOWED_TENANT_IDS` still returns `false` (fail closed).
+- [ ] Tenant ID check (`evaluateTenant`) still runs **before** the `isAllowedMember` membership check.
+- [ ] Empty `AUTH_ALLOWED_TENANT_IDS` still makes `evaluateTenant` return `{ ok: false }` (fail closed).
+- [ ] `events.signIn` still reconciles `user.role` from `member.role` (otherwise an invited-as-admin user stays a plain user after their first login).
 - [ ] `prompt: select_account` is still in the authorization params.
 - [ ] `pages: { error: "/auth/error" }` is still wired so errors hit the branded page.
 - [ ] `session.user.role = user.role` is still set in the session callback (consumers depend on it).
+- [ ] `activeSession()` still returns `null` for `revoked`; chat pages/routes use it (not bare `auth()`).
+
+### When you change `/admin/members` or `src/lib/members.ts`
+- [ ] Actions still re-check `role === "admin"` server-side (the disabled UI controls are not the gate).
+- [ ] You still can't change your **own** tier or remove yourself, and a batch that would leave **zero** admins is rejected.
+- [ ] "Remove user" still goes through `setMemberRole(email, "revoked")` — deletes that user's `session` rows and sets `user.role = "revoked"`; the row stays but `listMembers` (which filters out `revoked`) hides it; re-adding the email restores it.
+- [ ] `npm test` covers `normalizeEmail` / `parseBootstrapAdmins` / `evaluateTenant` (the DB-touching `members.ts` isn't unit-tested by design — same reason `auth-allowlist.ts` is split out).
 
 ---
 
@@ -128,6 +137,7 @@ Update this file when a new class of regression bites us. Promote sections up th
 - [ ] `npm run db:generate` succeeds with no drift after schema edits.
 - [ ] After a migration, sign-in still creates a user row and a session row (Auth.js adapter still wired).
 - [ ] `drizzle/meta/_journal.json` is committed alongside the migration SQL file.
+- [ ] After the `0002` migration: `SELECT email, role FROM member` shows the seeded bootstrap admins (+ a row per pre-existing `user`). Some migration steps in `0002` are hand-written SQL appended after the generated `CREATE TABLE` — re-generating won't reproduce them, so don't regenerate `0002`.
 
 ### Things to watch for
 - **One Neon project only** (`<neon-project-id>`, Vercel-managed) — do *not* create a second project. See `docs/db.md`.
