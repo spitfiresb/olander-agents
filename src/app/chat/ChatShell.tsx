@@ -5,10 +5,11 @@ import { DefaultChatTransport, type UIMessage } from "ai";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { PlusIcon } from "@/components/icons";
+import { HamburgerIcon } from "@/components/icons";
 import { Wordmark } from "@/components/Wordmark";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
+import { MobileSidebarDrawer } from "./MobileSidebarDrawer";
 import { Sidebar, type ConversationSummary } from "./Sidebar";
 import { signOutAction } from "./actions";
 
@@ -28,6 +29,16 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
     initialConversationId ?? null,
   );
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  // `refreshConversations` is recreated on render but only ever read by
+  // effects/handlers via the ref. The ref decouples the latest-search-query
+  // closure from the effect identity so the status-change effect doesn't
+  // need searchQuery in its deps (which would cause stray refetches).
+  const searchQueryRef = useRef(searchQuery);
+  useEffect(() => {
+    searchQueryRef.current = searchQuery;
+  }, [searchQuery]);
 
   // Single transport for the shell's lifetime. `body` is invoked per-request
   // by the AI SDK, so reading the ref there is safe — it's not a render-time
@@ -57,7 +68,11 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
 
   async function refreshConversations() {
     try {
-      const res = await fetch("/api/conversations", { cache: "no-store" });
+      const q = searchQueryRef.current.trim();
+      const url = q
+        ? `/api/conversations?q=${encodeURIComponent(q)}`
+        : "/api/conversations";
+      const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) return;
       const data = (await res.json()) as { conversations: ConversationSummary[] };
       setConversations(data.conversations ?? []);
@@ -67,11 +82,21 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
   }
 
   useEffect(() => {
-    // Mount-time fetch: the sidebar list is owned by the server, so the
-    // first render needs a fetch. setState in this effect is intentional.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refreshConversations();
-  }, []);
+    // Empty query refreshes immediately (mount + after clearing search);
+    // typing into the search box debounces 200ms so we don't fire a fetch
+    // on every keystroke. The cleanup cancels any pending fetch when the
+    // query changes again or the component unmounts. `refreshConversations`
+    // reads the latest query via searchQueryRef, so it doesn't need to live
+    // in this effect's dep array.
+    if (searchQuery === "") {
+      void refreshConversations();
+      return;
+    }
+    const t = setTimeout(() => {
+      void refreshConversations();
+    }, 200);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
   // After every assistant message lands, refresh the sidebar — the active
   // row's updatedAt has moved, and any new chat now has a row.
@@ -178,33 +203,98 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
     if (conversationId === id) startNewChat();
   }
 
+  async function onTogglePin(id: string, nextPinned: boolean) {
+    // Optimistic update so the row jumps to/from the Pinned group without
+    // waiting on the round-trip. If the PATCH fails, the next refresh undoes
+    // the optimistic change.
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === id
+          ? { ...c, pinnedAt: nextPinned ? new Date().toISOString() : null }
+          : c,
+      ),
+    );
+    try {
+      await fetch(`/api/conversations/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pinned: nextPinned }),
+      });
+    } finally {
+      await refreshConversations();
+    }
+  }
+
+  async function onRenameConversation(id: string, nextTitle: string) {
+    setConversations((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, title: nextTitle } : c)),
+    );
+    try {
+      await fetch(`/api/conversations/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: nextTitle }),
+      });
+    } finally {
+      await refreshConversations();
+    }
+  }
+
   return (
     <div className="flex h-dvh bg-brand-canvas">
-      <Sidebar
-        conversations={conversations}
-        activeId={conversationId}
-        onNewChat={startNewChat}
-        onDelete={onDeleteConversation}
-      />
+      {/* Desktop sidebar (hidden under lg). The mobile drawer below renders
+          the same Sidebar component inside a slide-over container. */}
+      <div className="hidden lg:flex">
+        <Sidebar
+          conversations={conversations}
+          activeId={conversationId}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          onNewChat={startNewChat}
+          onDelete={onDeleteConversation}
+          onTogglePin={onTogglePin}
+          onRename={onRenameConversation}
+        />
+      </div>
+
+      <MobileSidebarDrawer
+        open={mobileDrawerOpen}
+        onClose={() => setMobileDrawerOpen(false)}
+      >
+        <Sidebar
+          conversations={conversations}
+          activeId={conversationId}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          onNewChat={() => {
+            setMobileDrawerOpen(false);
+            startNewChat();
+          }}
+          onDelete={onDeleteConversation}
+          onTogglePin={onTogglePin}
+          onRename={onRenameConversation}
+          onRowSelect={() => setMobileDrawerOpen(false)}
+        />
+      </MobileSidebarDrawer>
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Mobile / tablet top bar (hidden on lg+) */}
         <header className="flex h-14 shrink-0 items-center gap-2 bg-brand-charcoal px-3 lg:hidden">
+          <button
+            type="button"
+            onClick={() => setMobileDrawerOpen(true)}
+            aria-label="Open chat history"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-white/15 bg-white/5 text-white transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal"
+          >
+            <HamburgerIcon />
+          </button>
           <Link
             href="/"
             aria-label="Olander Agents — back to home"
-            className="rounded-sm transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal"
+            className="mx-auto rounded-sm transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal"
           >
             <Wordmark variant="topbar" />
           </Link>
-          <button
-            type="button"
-            onClick={startNewChat}
-            aria-label="Start a new chat"
-            className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-white/15 bg-white/5 text-white transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal"
-          >
-            <PlusIcon />
-          </button>
           <AccountMenu variant="charcoal" isAdmin={isAdmin} />
         </header>
 

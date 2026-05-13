@@ -67,7 +67,8 @@ export const verificationTokens = pgTable(
 // --- Chat persistence (TODO §3) --------------------------------------------
 // One row per chat. `deletedAt` is the soft-delete tombstone; reads filter on
 // `deletedAt IS NULL`. Title is the first 60 chars of the first user message,
-// editable later via PATCH.
+// editable later via PATCH. `pinnedAt` is null for unpinned chats; pinned
+// chats sort by pinnedAt desc above the recency groups.
 export const conversations = pgTable(
   "conversation",
   {
@@ -85,6 +86,7 @@ export const conversations = pgTable(
       .notNull()
       .defaultNow(),
     deletedAt: timestamp("deletedAt", { mode: "date", withTimezone: true }),
+    pinnedAt: timestamp("pinnedAt", { mode: "date", withTimezone: true }),
   },
   (t) => [index("conv_user_updated_idx").on(t.userId, t.updatedAt)],
 );
@@ -93,6 +95,12 @@ export const conversations = pgTable(
 // (text + tool-invocation + tool-result), so replay on reload looks
 // identical to the original render. `model` and `usage` are nullable so
 // historical rows from before we logged them stay valid.
+//
+// `searchText` is the flattened concatenation of text parts, populated at
+// write time. The Postgres tsvector column (`searchVector`) is declared in
+// the migration SQL as a STORED generated column over `searchText` plus a
+// GIN index — it's queried via raw `sql` template literals from
+// lib/conversations because drizzle doesn't model tsvector natively.
 export const messages = pgTable(
   "message",
   {
@@ -106,6 +114,7 @@ export const messages = pgTable(
     parts: jsonb("parts").notNull(),
     model: text("model"),
     usage: jsonb("usage"),
+    searchText: text("searchText").notNull().default(""),
     createdAt: timestamp("createdAt", { mode: "date", withTimezone: true })
       .notNull()
       .defaultNow(),

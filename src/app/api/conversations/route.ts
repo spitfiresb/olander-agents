@@ -1,14 +1,21 @@
 import { auth } from "@/auth";
-import { listConversations, createConversation } from "@/lib/conversations";
+import {
+  createConversation,
+  listConversations,
+  searchConversations,
+} from "@/lib/conversations";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
-  const rows = await listConversations(session.user.id);
+  const q = new URL(req.url).searchParams.get("q")?.trim() ?? "";
+  const rows = q
+    ? await searchConversations(session.user.id, q)
+    : await listConversations(session.user.id);
   return Response.json({ conversations: rows });
 }
 

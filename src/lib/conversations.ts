@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { conversations, messages, toolCalls } from "@/db/schema";
 
@@ -23,10 +23,86 @@ export async function listConversations(userId: string) {
       id: conversations.id,
       title: conversations.title,
       updatedAt: conversations.updatedAt,
+      pinnedAt: conversations.pinnedAt,
     })
     .from(conversations)
     .where(and(eq(conversations.userId, userId), isNull(conversations.deletedAt)))
-    .orderBy(desc(conversations.updatedAt));
+    .orderBy(
+      // Pinned rows surface first (newest pin on top), then everything else
+      // by recency. NULLS LAST keeps unpinned rows below the pinned group.
+      sql`${conversations.pinnedAt} desc nulls last`,
+      desc(conversations.updatedAt),
+    );
+}
+
+// Title ILIKE + full-text on message bodies. Returns conversation summaries
+// ordered pinned-first, then by FTS rank descending, then by recency. Always
+// filters by userId — pass the calling user's id, never one from the body.
+export async function searchConversations(userId: string, query: string) {
+  const trimmed = query.trim();
+  if (!trimmed) return listConversations(userId);
+
+  // plainto_tsquery is the right fit for a search box: punctuation-tolerant,
+  // ANDs the words together, no operator surface for users to fight with.
+  // ts_rank_cd ranks rows that match more terms / shorter texts higher.
+  const titlePattern = `%${trimmed.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+
+  return db
+    .select({
+      id: conversations.id,
+      title: conversations.title,
+      updatedAt: conversations.updatedAt,
+      pinnedAt: conversations.pinnedAt,
+      rank: sql<number>`
+        coalesce(
+          max(ts_rank_cd(${messages}."searchVector", plainto_tsquery('english', ${trimmed}))),
+          0
+        )
+      `.mapWith(Number),
+    })
+    .from(conversations)
+    .leftJoin(messages, eq(messages.conversationId, conversations.id))
+    .where(
+      and(
+        eq(conversations.userId, userId),
+        isNull(conversations.deletedAt),
+        or(
+          ilike(conversations.title, titlePattern),
+          sql`${messages}."searchVector" @@ plainto_tsquery('english', ${trimmed})`,
+        ),
+      ),
+    )
+    .groupBy(
+      conversations.id,
+      conversations.title,
+      conversations.updatedAt,
+      conversations.pinnedAt,
+    )
+    .orderBy(
+      sql`${conversations.pinnedAt} desc nulls last`,
+      sql`rank desc`,
+      desc(conversations.updatedAt),
+    )
+    .limit(50);
+}
+
+export async function setPinned(
+  userId: string,
+  conversationId: string,
+  pinned: boolean,
+) {
+  const result = await db
+    .update(conversations)
+    .set({ pinnedAt: pinned ? new Date() : null })
+    .where(
+      and(
+        eq(conversations.id, conversationId),
+        eq(conversations.userId, userId),
+        isNull(conversations.deletedAt),
+      ),
+    )
+    .returning({ id: conversations.id });
+  return result.length > 0;
 }
 
 export async function createConversation(userId: string, title: string) {
@@ -134,6 +210,7 @@ export async function appendMessages(
         parts: m.parts as object,
         model: m.model ?? null,
         usage: (m.usage ?? null) as object | null,
+        searchText: extractSearchText(m.parts),
       })),
     )
     .returning({ id: messages.id, parts: messages.parts, role: messages.role });
@@ -184,6 +261,28 @@ function isToolPartShape(part: unknown): part is {
     typeof (part as { type: unknown }).type === "string" &&
     (part as { type: string }).type.startsWith("tool-")
   );
+}
+
+// Flattens text parts from a UIMessage.parts array into a single string the
+// Postgres tsvector column can index. Mirrors the backfill SQL in
+// migration 0002 — keep the two in sync if the part shape ever changes.
+export function extractSearchText(parts: unknown): string {
+  if (!Array.isArray(parts)) return "";
+  const out: string[] = [];
+  for (const p of parts) {
+    if (
+      typeof p === "object" &&
+      p !== null &&
+      "type" in p &&
+      (p as { type: unknown }).type === "text" &&
+      "text" in p &&
+      typeof (p as { text: unknown }).text === "string"
+    ) {
+      const t = (p as { text: string }).text.trim();
+      if (t) out.push(t);
+    }
+  }
+  return out.join(" ");
 }
 
 export async function exportConversationMarkdown(

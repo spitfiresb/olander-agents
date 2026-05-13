@@ -3,6 +3,7 @@ import {
   getConversation,
   loadMessages,
   renameConversation,
+  setPinned,
   softDeleteConversation,
 } from "@/lib/conversations";
 
@@ -34,12 +35,27 @@ export async function PATCH(req: Request, ctx: Ctx) {
   } catch {
     return Response.json({ error: "bad_request" }, { status: 400 });
   }
-  const title = (body as { title?: unknown }).title;
-  if (typeof title !== "string" || title.trim().length === 0) {
+  const { title, pinned } = body as { title?: unknown; pinned?: unknown };
+
+  // Accept either field. If both are present, both apply. At least one must
+  // be present and well-typed; otherwise the request is malformed.
+  const hasTitle =
+    title !== undefined &&
+    typeof title === "string" &&
+    title.trim().length > 0;
+  const hasPinned = typeof pinned === "boolean";
+  if (!hasTitle && !hasPinned) {
     return Response.json({ error: "bad_request" }, { status: 400 });
   }
-  const ok = await renameConversation(session.user.id, id, title);
-  if (!ok) return Response.json({ error: "not_found" }, { status: 404 });
+
+  if (hasTitle) {
+    const ok = await renameConversation(session.user.id, id, title as string);
+    if (!ok) return Response.json({ error: "not_found" }, { status: 404 });
+  }
+  if (hasPinned) {
+    const ok = await setPinned(session.user.id, id, pinned as boolean);
+    if (!ok) return Response.json({ error: "not_found" }, { status: 404 });
+  }
   return Response.json({ ok: true });
 }
 
