@@ -8,6 +8,8 @@ import {
 } from "@/lib/ai/model";
 import { SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
 import { tools } from "@/lib/ai/tools";
+import { isExcelMimeType, ownsAttachmentUrl } from "@/lib/blob";
+import { fetchAndConvertExcel } from "@/lib/excel";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { isSameOrigin } from "@/lib/csrf";
 import {
@@ -18,21 +20,53 @@ import {
 
 export const maxDuration = 60;
 
-// User-role parts must be text-only. `z.unknown()` would let a caller embed a
-// forged `tool-result` part that the model treats as authoritative output —
-// benign today (inventorySearch is read-only) but an authorization-spoofing
-// vector the moment a mutating tool lands. Assistant parts stay permissive
-// because the client replays tool-call/tool-result history from prior turns;
-// the only real fix for that is server-persisted message state.
+// User-role parts are text OR file — never anything else. The strict shape
+// stops a caller from embedding a forged `tool-result` part that the model
+// would treat as authoritative output (benign today, but an authorization-
+// spoofing vector the moment a mutating tool lands). The discriminated union
+// is the deliberately narrow relaxation needed for Stage 2 attachments;
+// dropping back to `z.unknown()` would recreate the CVE-class regression
+// fixed in 760db8a / TESTING.md §2.
+//
+// Assistant parts stay permissive because the client replays tool-call /
+// tool-result history from prior turns; the only real fix for that is
+// server-persisted message state.
 const UserTextPart = z.object({
   type: z.literal("text"),
   text: z.string(),
 });
 
+// Mirror the allowlist in src/lib/blob.ts (isAllowedMimeType). Anchored at
+// both ends so `text/foo` style smuggling doesn't slip past — only the
+// enumerated MIMEs are accepted. The regex is duplicated by intent: the
+// schema mirror in src/app/api/chat/__tests__/body-schema.test.ts copies
+// it verbatim, and a shared import would couple the schema test to the
+// blob module's side effects.
+const ALLOWED_FILE_MIME_RE =
+  /^(image\/(png|jpe?g|webp|gif)|application\/pdf|text\/(plain|csv|tab-separated-values)|application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|application\/vnd\.ms-excel)$/;
+
+const UserFilePart = z.object({
+  type: z.literal("file"),
+  mediaType: z
+    .string()
+    .max(128)
+    .regex(ALLOWED_FILE_MIME_RE, "unsupported mediaType"),
+  url: z.string().url().max(1024),
+  filename: z.string().max(255),
+  size: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(10 * 1024 * 1024)
+    .optional(),
+});
+
 const UserMessage = z.object({
   id: z.string(),
   role: z.literal("user"),
-  parts: z.array(UserTextPart).min(1),
+  parts: z
+    .array(z.discriminatedUnion("type", [UserTextPart, UserFilePart]))
+    .min(1),
 });
 
 const AssistantMessage = z.object({
@@ -48,6 +82,42 @@ const BodySchema = z.object({
     .min(1)
     .max(50),
 });
+
+type ParsedUserMessage = z.infer<typeof UserMessage>;
+type ParsedUserPart = ParsedUserMessage["parts"][number];
+
+// Walk a user message and replace Excel file parts with synthesized CSV
+// text parts. The original file part is still in `message.parts` saved to
+// the DB (persistence happens upstream of this), so the user-bubble chip
+// keeps its download link in history; the model just sees the CSV.
+//
+// PDFs and images flow through unchanged — Anthropic accepts them natively
+// and the AI SDK's convertToModelMessages handles the provider mapping.
+async function expandExcelPartsForModel(
+  message: ParsedUserMessage,
+): Promise<ParsedUserMessage> {
+  const out: ParsedUserPart[] = [];
+  for (const part of message.parts) {
+    if (part.type === "file" && isExcelMimeType(part.mediaType)) {
+      try {
+        const csv = await fetchAndConvertExcel(part.url);
+        out.push({
+          type: "text",
+          text: `Attached spreadsheet \`${part.filename}\` (converted from ${part.mediaType} to CSV):\n\n${csv}`,
+        });
+      } catch (err) {
+        console.error("[chat] excel conversion failed:", part.filename, err);
+        out.push({
+          type: "text",
+          text: `[Attached spreadsheet \`${part.filename}\` could not be read. Tell the user the file may be corrupted and ask them to retry.]`,
+        });
+      }
+    } else {
+      out.push(part);
+    }
+  }
+  return { ...message, parts: out };
+}
 
 export async function POST(req: Request) {
   const devBypass =
@@ -103,6 +173,24 @@ export async function POST(req: Request) {
   const parsed = BodySchema.safeParse(raw);
   if (!parsed.success) {
     return Response.json({ error: "bad_request" }, { status: 400 });
+  }
+
+  // Ownership / SSRF gate for file parts. Every file URL the client sent
+  // must live under chat-attachments/{callingUserId}/ on a Vercel Blob host.
+  // The schema already restricted the MIME; this prevents a client from
+  // forging a URL pointing to another user's blob (or an arbitrary host
+  // that the chat route would then fetch server-side during Excel→CSV).
+  //
+  // No userId means dev bypass — there's no namespace to verify against,
+  // so reject any file parts in that mode rather than letting them through.
+  for (const m of parsed.data.messages) {
+    if (m.role !== "user") continue;
+    for (const part of m.parts) {
+      if (part.type !== "file") continue;
+      if (!userId || !ownsAttachmentUrl(part.url, userId)) {
+        return Response.json({ error: "forbidden" }, { status: 403 });
+      }
+    }
   }
 
   let model;
@@ -164,6 +252,16 @@ export async function POST(req: Request) {
     }
   }
 
+  // Build the model-facing messages array. Excel file parts are swapped
+  // for synthesized CSV text parts (Anthropic doesn't accept .xlsx). The
+  // persisted message (above) still carries the original file part with
+  // its URL, so the user-bubble chip keeps its download link on reload.
+  const modelFacingMessages = await Promise.all(
+    parsed.data.messages.map(async (m) =>
+      m.role === "user" ? await expandExcelPartsForModel(m) : m,
+    ),
+  );
+
   const result = streamText({
     model,
     // SystemModelMessage form lets us mark the prompt for Anthropic's
@@ -177,7 +275,7 @@ export async function POST(req: Request) {
         anthropic: { cacheControl: { type: "ephemeral" } },
       },
     },
-    messages: await convertToModelMessages(parsed.data.messages as UIMessage[]),
+    messages: await convertToModelMessages(modelFacingMessages as UIMessage[]),
     tools,
     temperature: MODEL_TEMPERATURE,
     maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS,
