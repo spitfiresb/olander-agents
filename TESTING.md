@@ -92,7 +92,7 @@ Update this file when a new class of regression bites us. Promote sections up th
 - [ ] Visit `/status` while signed out → page renders, shows operational/degraded/down per service, **no internal IPs or hostnames anywhere in the HTML or `/api/status` JSON**.
 - [ ] Each service shows a 90-day uptime bar that isn't entirely empty.
 - [ ] P21 service reflects the droplet's actual health (force a failure on the droplet → status page shows it within the refresh window).
-- [ ] Anthropic service falls back to `status.anthropic.com` if droplet payload lacks `anthropic` checks.
+- [ ] Anthropic service reflects the droplet's direct probe of `api.anthropic.com/v1/models` (operational when the probe gets any 2xx/3xx/4xx response — a healthy API replies 401 to the unauth'd request; only 5xx / timeout / connection error → down). No `status.anthropic.com` fallback — that source was too noisy and was retired.
 
 ### Things that have actually broken
 - **`/api/status` leaked check details to unauthenticated callers** (435c0f2) — exact IPs, hostnames, HTTP error bodies from internal hosts. Fix was symbolic labels only (`"egress IP mismatch"`, not the actual IP). Re-check after any edit to `buildP21Service`.

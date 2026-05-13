@@ -24,7 +24,6 @@ type Window = { checks: number; ok: number; pct: number | null };
 
 type AnthropicCheck = {
   ok: boolean;
-  indicator?: string;
   http_status?: number;
   latency_ms?: number;
 };
@@ -134,14 +133,6 @@ function buildDays(payload: DropletPayload | null): Day[] {
   return days;
 }
 
-function indicatorToState(indicator: string | undefined): ServiceState {
-  if (!indicator || indicator === "unknown") return "unknown";
-  if (indicator === "none") return "operational";
-  if (indicator === "minor" || indicator === "maintenance") return "degraded";
-  if (indicator === "major" || indicator === "critical") return "down";
-  return "unknown";
-}
-
 function buildAnthropicDays(payload: DropletPayload | null): Day[] {
   const days = emptyDays();
   if (!payload?.anthropic?.daily) return days;
@@ -242,13 +233,11 @@ function buildP21Service(
   };
 }
 
-async function buildAnthropicService(
-  payload: DropletPayload | null,
-): Promise<Service> {
+function buildAnthropicService(payload: DropletPayload | null): Service {
   const base: Service = {
     id: "anthropic",
     name: "Anthropic API",
-    description: "Powers the chat assistant",
+    description: "Direct reachability probe of api.anthropic.com",
     state: "unknown",
     message: "—",
     checked_at: null,
@@ -256,55 +245,29 @@ async function buildAnthropicService(
     days: emptyDays(),
   };
 
-  // Preferred path: the droplet observed Anthropic in its last check.
   const latestAnth = payload?.latest?.checks?.anthropic;
-  if (latestAnth) {
-    const state = indicatorToState(latestAnth.indicator);
-    const days = buildAnthropicDays(payload);
-    return {
-      ...base,
-      state,
-      message: latestAnth.ok
-        ? "All systems operational"
-        : `Status: ${latestAnth.indicator ?? "unknown"}`,
-      checked_at: payload?.latest?.checked_at ?? null,
-      uptime_pct: computeWindowPct(days),
-      days,
-    };
+  if (!latestAnth) {
+    return { ...base, message: "No checks recorded yet" };
   }
 
-  // Fallback: hit Anthropic's status API directly. Used during the deploy
-  // window before the updated healthcheck has run on the droplet, or if the
-  // droplet is unreachable.
-  try {
-    const res = await fetchWithTimeout(
-      "https://status.anthropic.com/api/v2/status.json",
-      { redirect: "follow" },
-    );
-    if (!res.ok) {
-      return { ...base, state: "down", message: `Anthropic status returned HTTP ${res.status}` };
-    }
-    const json = (await res.json()) as {
-      page?: { updated_at?: string };
-      status?: { indicator?: string; description?: string };
-    };
-    const state = indicatorToState(json.status?.indicator);
-    const days = emptyDays();
-    days[days.length - 1] = {
-      ...days[days.length - 1],
-      pct: state === "operational" ? 100 : state === "degraded" ? 95 : 50,
-    };
-    return {
-      ...base,
-      state,
-      message: json.status?.description ?? "Unknown",
-      checked_at: json.page?.updated_at ?? null,
-      days,
-    };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ...base, state: "unknown", message: `Could not reach Anthropic status: ${msg}` };
-  }
+  // The droplet's unauth'd probe of /v1/models returns 401 when the API is
+  // healthy — that's `ok=true`. Failures are timeouts, connection errors,
+  // and 5xx. We don't try to distinguish "degraded" from "down" here; the
+  // probe is binary.
+  const state: ServiceState = latestAnth.ok ? "operational" : "down";
+  const days = buildAnthropicDays(payload);
+  return {
+    ...base,
+    state,
+    message: latestAnth.ok
+      ? "All systems operational"
+      : latestAnth.http_status
+        ? `API returned HTTP ${latestAnth.http_status}`
+        : "API unreachable",
+    checked_at: payload?.latest?.checked_at ?? null,
+    uptime_pct: computeWindowPct(days),
+    days,
+  };
 }
 
 function buildP21ApiService(
@@ -382,7 +345,7 @@ export async function GET() {
   const { payload, error } = await fetchDropletPayload();
   const p21 = buildP21Service(payload, error);
   const p21Api = buildP21ApiService(payload, error);
-  const anthropic = await buildAnthropicService(payload);
+  const anthropic = buildAnthropicService(payload);
   return NextResponse.json(
     { fetched_at: new Date().toISOString(), services: [p21, p21Api, anthropic] },
     { headers: { "Cache-Control": "no-store" } },

@@ -16,7 +16,10 @@ EXPECTED_EGRESS_IP="${EXPECTED_EGRESS_IP:-<proxy-ip>}"
 P21_HOST="${P21_HOST:-<p21-host>}"
 P21_EXPECTED_DNS="${P21_EXPECTED_DNS:-<p21-host-ip>}"
 P21_PROBE_URL="${P21_PROBE_URL:-https://${P21_HOST}/prophet21/}"
-ANTHROPIC_STATUS_URL="${ANTHROPIC_STATUS_URL:-https://status.anthropic.com/api/v2/status.json}"
+# Hit the real API our chat uses, not Anthropic's Statuspage. Unauth'd
+# /v1/models returns 401 with a JSON body when the API is healthy — that 401
+# is the "ok" signal. Timeouts, connection errors, and 5xx are real outages.
+ANTHROPIC_PROBE_URL="${ANTHROPIC_PROBE_URL:-https://api.anthropic.com/v1/models}"
 # OLANDER_DOMAIN is optional. If set, we add a TLS-expiry check for
 # egress.<domain> to the JSON record. If unset, the field is omitted.
 OLANDER_DOMAIN="${OLANDER_DOMAIN:-}"
@@ -220,32 +223,34 @@ else
   p21_api_ok=false
 fi
 
-# --- Check 6: Anthropic API status (third-party reference) ------------------
-# Polls Anthropic's public Statuspage. Their state never affects our `overall`
-# — if Anthropic is down, our P21 plumbing is still ours to monitor. We log
-# it so the dashboard can show their reliability alongside ours.
+# --- Check 6: Anthropic API reachability ------------------------------------
+# Direct probe of the API our chat depends on. We previously polled
+# status.anthropic.com, but that conflated three things: (1) real Anthropic
+# incidents, (2) Statuspage CDN latency, (3) any non-`none` indicator on
+# unrelated Anthropic surfaces. The result was ~16% false "downtime" on
+# 2026-05-13 while Statuspage showed no incident — curls to Statuspage timed
+# out and were recorded as Anthropic outage.
+#
+# /v1/models with no auth header should always 401 when the API is healthy
+# (and respond fast — typically <500ms). 5xx, 0 (connection error), or
+# timeout = real availability signal. 2xx/3xx are accepted as ok too in case
+# Anthropic ever serves the catalog publicly.
 anth_ok=false
-anth_indicator="unknown"
 anth_status=0
 anth_latency=0
 anth_start="$(now_ms)"
-anth_body="$(curl -sSL --max-time 8 -w '\n%{http_code}' "$ANTHROPIC_STATUS_URL" 2>/dev/null || true)"
+anth_status_raw="$(curl -sS -o /dev/null --max-time 10 -w '%{http_code}' \
+  "$ANTHROPIC_PROBE_URL" 2>/dev/null || true)"
 anth_end="$(now_ms)"
 [[ -n "$anth_end" && -n "$anth_start" ]] && anth_latency=$(( anth_end - anth_start ))
-anth_status_raw="${anth_body##*$'\n'}"
-anth_json="${anth_body%$'\n'*}"
 if [[ "$anth_status_raw" =~ ^[0-9]{3}$ ]]; then
   anth_status="$anth_status_raw"
 fi
-if [[ "$anth_status" =~ ^[23][0-9][0-9]$ && -n "$anth_json" ]]; then
-  anth_indicator="$(printf '%s' "$anth_json" | python3 -c '
-import json, sys
-try:
-  print(json.load(sys.stdin).get("status", {}).get("indicator", "unknown"))
-except Exception:
-  print("unknown")
-' 2>/dev/null || echo unknown)"
-  [[ "$anth_indicator" == "none" ]] && anth_ok=true
+# 401 = healthy API rejecting our unauth'd probe. 2xx/3xx also count. 4xx
+# other than 401 still means the API responded to us — accept the whole 4xx
+# band as "API alive." 5xx and 0 are the failure modes we care about.
+if [[ "$anth_status" =~ ^[234][0-9][0-9]$ ]]; then
+  anth_ok=true
 fi
 
 # --- Aggregate ---------------------------------------------------------------
@@ -284,7 +289,7 @@ record="$(
   TLS_PRESENT="$tls_present" TLS_OK="$tls_ok" TLS_HOURS="$tls_hours" TLS_EXPIRES_AT="$tls_expires_at" \
   PROXY_PRESENT="$proxy_present" PROXY_OK="$proxy_ok" PROXY_STATUS="$proxy_status" PROXY_LATENCY="$proxy_latency" PROXY_CREDS="$proxy_creds_present" PROXY_URL="$PROXY_HEALTHZ_URL" \
   P21_API_OK="$p21_api_ok" P21_TOKEN_OK="$proxy_token_ok" P21_VIEW_OK="$proxy_view_ok" P21_LAST_ERROR="$proxy_last_error" \
-  ANTH_OK="$anth_ok" ANTH_INDICATOR="$anth_indicator" ANTH_STATUS="$anth_status" ANTH_LATENCY="$anth_latency" \
+  ANTH_OK="$anth_ok" ANTH_STATUS="$anth_status" ANTH_LATENCY="$anth_latency" \
   python3 -c '
 import json, os
 e = os.environ
@@ -302,7 +307,7 @@ if b("TLS_PRESENT"):
 if b("PROXY_PRESENT"):
   checks["proxy_up"] = {"ok": b("PROXY_OK"), "http_status": i("PROXY_STATUS"), "latency_ms": i("PROXY_LATENCY"), "creds_present": b("PROXY_CREDS"), "url": e["PROXY_URL"]}
   checks["p21_api"] = {"ok": b("P21_API_OK"), "token_ok": b("P21_TOKEN_OK"), "view_query_ok": b("P21_VIEW_OK"), "last_error": e["P21_LAST_ERROR"], "creds_present": b("PROXY_CREDS")}
-checks["anthropic"] = {"ok": b("ANTH_OK"), "indicator": e["ANTH_INDICATOR"], "http_status": i("ANTH_STATUS"), "latency_ms": i("ANTH_LATENCY")}
+checks["anthropic"] = {"ok": b("ANTH_OK"), "http_status": i("ANTH_STATUS"), "latency_ms": i("ANTH_LATENCY")}
 print(json.dumps({
   "checked_at": e["CHECKED_AT"],
   "overall":    e["OVERALL"],

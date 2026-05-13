@@ -26,6 +26,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from zoneinfo import ZoneInfo
 
 DATA_DIR = os.environ.get("DATA_DIR", "/var/lib/olander-health")
 LATEST_FILE = os.path.join(DATA_DIR, "latest.json")
@@ -35,7 +36,13 @@ PORT = int(os.environ.get("PORT", "8088"))
 HOST = os.environ.get("HOST", "0.0.0.0")
 
 WINDOWS = {"1h": timedelta(hours=1), "24h": timedelta(hours=24), "7d": timedelta(days=7)}
-DAILY_DAYS = 90  # how many trailing UTC days the /health response includes
+DAILY_DAYS = 90  # how many trailing days the /health response includes
+
+# Daily cells are keyed by Pacific calendar date so the dashboard's "today"
+# doesn't roll over halfway through the West Coast workday. The Next.js
+# /api/status route builds its 90-day cell array in the same zone and merges
+# our `daily[*].date` strings by exact match — they have to agree.
+DAILY_TZ = ZoneInfo("America/Los_Angeles")
 
 # In-memory cache for the bucketed log. Healthcheck appends to log.jsonl at
 # most once per 60s, so a 30s cache costs at most one stale window — well
@@ -86,7 +93,9 @@ def _bucket_record(record_ok, ts, cutoffs, buckets, daily, daily_cutoff):
             buckets[window]["checks"] += 1
             if record_ok:
                 buckets[window]["ok"] += 1
-    day = ts.date()
+    # Project the UTC timestamp onto the Pacific calendar so the cell labeled
+    # "today" really contains today's checks from the user's perspective.
+    day = ts.astimezone(DAILY_TZ).date()
     if day >= daily_cutoff:
         key = day.isoformat()
         if key in daily:
@@ -126,7 +135,7 @@ def compute_uptime_and_daily(now):
     so the pre-creds bootstrap window doesn't contribute either.
     """
     cutoffs = {k: now - delta for k, delta in WINDOWS.items()}
-    today = now.date()
+    today = now.astimezone(DAILY_TZ).date()
     daily_cutoff = today - timedelta(days=DAILY_DAYS - 1)
 
     p21_buckets = _empty_buckets(WINDOWS)
