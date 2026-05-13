@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { removeMemberAction, setTiersAction } from "./actions";
 import { TierDropdown, type Tier } from "./TierDropdown";
 
@@ -24,7 +24,63 @@ export function MembersTable({
   const [isSaving, startSaving] = useTransition();
   const [isRemoving, startRemoving] = useTransition();
   const [removingEmail, setRemovingEmail] = useState<string | null>(null);
+  // Set when the user clicks "Remove user" on a row. The modal opens and
+  // gates the actual server call behind an explicit Confirm click.
+  const [pendingRemoval, setPendingRemovalRaw] = useState<
+    { email: string; label: string } | null
+  >(null);
+  // Mirrors pendingRemoval but clears on a delay matching the dialog close
+  // animation, so the label keeps rendering while the dialog fades out.
+  // Always updated via setPendingRemoval (below) — never directly.
+  const [displayedRemoval, setDisplayedRemoval] = useState<
+    { email: string; label: string } | null
+  >(null);
+  const clearDisplayedTimerRef = useRef<number | null>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const busy = isSaving || isRemoving;
+
+  // Single update path so every change to pendingRemoval also keeps
+  // displayedRemoval in sync — immediate on open, delayed on close. All
+  // call-sites use this instead of setPendingRemovalRaw.
+  function setPendingRemoval(value: { email: string; label: string } | null) {
+    if (clearDisplayedTimerRef.current !== null) {
+      window.clearTimeout(clearDisplayedTimerRef.current);
+      clearDisplayedTimerRef.current = null;
+    }
+    if (value) {
+      setDisplayedRemoval(value);
+    } else {
+      clearDisplayedTimerRef.current = window.setTimeout(() => {
+        setDisplayedRemoval(null);
+        clearDisplayedTimerRef.current = null;
+      }, 220);
+    }
+    setPendingRemovalRaw(value);
+  }
+
+  // Cancel the pending displayed-clear timer if the component unmounts
+  // (e.g. user navigates away mid-close-animation).
+  useEffect(() => {
+    return () => {
+      if (clearDisplayedTimerRef.current !== null) {
+        window.clearTimeout(clearDisplayedTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Drive the native <dialog> open/close from React state. `showModal()`
+  // puts the dialog in the browser's top layer (above everything, ignores
+  // z-index), traps focus, and wires up Esc-to-close for us. Centering +
+  // entry/exit animation live in globals.css under `.confirm-dialog`.
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (pendingRemoval && !dialog.open) {
+      dialog.showModal();
+    } else if (!pendingRemoval && dialog.open) {
+      dialog.close();
+    }
+  }, [pendingRemoval]);
 
   const dirty = useMemo(() => {
     const out: { email: string; role: Tier }[] = [];
@@ -57,14 +113,15 @@ export function MembersTable({
     });
   }
 
-  function remove(email: string) {
-    if (
-      !window.confirm(
-        `Remove ${email}? They'll be signed out and lose access immediately. You can re-add them by email later.`,
-      )
-    ) {
-      return;
-    }
+  function requestRemoval(email: string, label: string) {
+    if (busy) return;
+    setError(null);
+    setPendingRemoval({ email, label });
+  }
+
+  function confirmRemoval() {
+    if (!pendingRemoval) return;
+    const email = pendingRemoval.email;
     setError(null);
     setRemovingEmail(email);
     startRemoving(async () => {
@@ -74,8 +131,18 @@ export function MembersTable({
         setError(e instanceof Error ? e.message : "Couldn't remove member.");
       } finally {
         setRemovingEmail(null);
+        setPendingRemoval(null);
       }
     });
+  }
+
+  // Clicking the dialog backdrop (the dimmed area outside the card) lands
+  // on the <dialog> element itself, not its inner content. Use that to
+  // dismiss — but never mid-removal, since that would leave the user with
+  // a "Removing…" toast and no way to see the outcome land in the table.
+  function onDialogClick(e: React.MouseEvent<HTMLDialogElement>) {
+    if (isRemoving) return;
+    if (e.target === dialogRef.current) setPendingRemoval(null);
   }
 
   const canSave = dirty.length > 0 && !busy;
@@ -144,7 +211,7 @@ export function MembersTable({
                   <td className="px-3 py-2 text-right align-middle">
                     <button
                       type="button"
-                      onClick={() => remove(m.email)}
+                      onClick={() => requestRemoval(m.email, m.name ?? m.email)}
                       disabled={isSelf || busy}
                       className="rounded-md px-2.5 py-1 text-xs font-medium text-brand-red transition-colors hover:bg-brand-red/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
                     >
@@ -168,6 +235,57 @@ export function MembersTable({
         </table>
       </div>
       {error ? <p className="mt-2 text-sm text-brand-red">{error}</p> : null}
+
+      {/* Confirm-removal modal. Always in the DOM; visibility driven by
+          showModal()/close() in the useEffect above. The native <dialog>
+          gives us focus trap, Esc-to-close, and top-layer rendering for
+          free. Centering + open/close animations are in globals.css under
+          the .confirm-dialog class — using @starting-style + allow-discrete
+          so the dialog can transition in AND out of display:none. */}
+      <dialog
+        ref={dialogRef}
+        onClose={() => setPendingRemoval(null)}
+        onClick={onDialogClick}
+        aria-labelledby="remove-member-title"
+        className="confirm-dialog w-[calc(100%-3rem)] max-w-md rounded-2xl border border-brand-charcoal/10 bg-white p-6 shadow-2xl"
+      >
+        {displayedRemoval ? (
+          <div>
+            <h2
+              id="remove-member-title"
+              className="text-base font-semibold text-brand-charcoal"
+            >
+              Remove this user?
+            </h2>
+            <p className="mt-2 text-sm text-brand-ink-soft">
+              <span className="font-medium text-brand-charcoal">
+                {displayedRemoval.label}
+              </span>{" "}
+              will be signed out and lose access immediately. You can re-add
+              them by email later.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingRemoval(null)}
+                disabled={isRemoving}
+                className="rounded-md border border-brand-charcoal/15 bg-white px-3 py-1.5 text-sm font-medium text-brand-charcoal transition-colors hover:bg-brand-charcoal/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-charcoal/30 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmRemoval}
+                disabled={isRemoving}
+                autoFocus
+                className="rounded-md bg-brand-red px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-brand-red/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isRemoving ? "Removing…" : "Remove user"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </dialog>
     </div>
   );
 }
