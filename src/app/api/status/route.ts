@@ -14,7 +14,7 @@ type DropletCheckResult = {
 };
 
 type Day = {
-  date: string; // YYYY-MM-DD (UTC)
+  date: string; // YYYY-MM-DD (Pacific — see emptyDays)
   pct: number | null; // null = no data recorded that day
   checks?: number;
   ok?: number; // passing checks; (checks - ok) = ~minutes of downtime (1 check / 60s)
@@ -87,15 +87,25 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}) {
   }
 }
 
-// Build a 90-element array of UTC dates, oldest → newest.
+// Build a 90-element array of Pacific calendar dates, oldest → newest. The
+// droplet emits daily aggregates keyed by UTC date strings, which we then
+// match by string against these cells in build*Days. Cells therefore advance
+// at Pacific midnight (not UTC midnight) so "today" doesn't roll over halfway
+// through the West Coast workday.
 function emptyDays(): Day[] {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const today = fmt.format(new Date()); // YYYY-MM-DD in Pacific
+  const [y, m, d] = today.split("-").map(Number);
+  const base = Date.UTC(y, m - 1, d);
   const out: Day[] = [];
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
   for (let i = WINDOW_DAYS - 1; i >= 0; i--) {
-    const d = new Date(today);
-    d.setUTCDate(d.getUTCDate() - i);
-    out.push({ date: d.toISOString().slice(0, 10), pct: null });
+    const ms = base - i * 86_400_000;
+    out.push({ date: new Date(ms).toISOString().slice(0, 10), pct: null });
   }
   return out;
 }
