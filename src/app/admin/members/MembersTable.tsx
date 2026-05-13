@@ -100,11 +100,7 @@ export function MembersTable({
                       : "cursor-not-allowed bg-brand-charcoal/10 text-brand-ink-soft"
                   }`}
                 >
-                  {isSaving
-                    ? "Saving…"
-                    : dirty.length > 0
-                      ? `Save changes (${dirty.length})`
-                      : "Save changes"}
+                  {isSaving ? "Saving…" : "Save changes"}
                 </button>
               </th>
             </tr>

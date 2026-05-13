@@ -27,15 +27,29 @@ body {
 
 /* Clickable controls get the hand cursor. Browsers don't set this on <button>
    by default, and Tailwind v4's Preflight doesn't either — so without this
-   most buttons show the arrow cursor, and it flickers as the pointer moves
-   between a button and an adjacent link or text. Disabled controls get
-   not-allowed. In @layer base so per-element `cursor-*` utilities still win. */
+   most buttons show the arrow cursor. Disabled controls get not-allowed. In
+   @layer base so per-element `cursor-*` utilities still win.
+   The descendant rule below uses `cursor: inherit` (low-specificity via
+   `:where()`) because some elements inside buttons (icons, spans rendered by
+   Next's <Link>, etc.) can compute a different cursor and not pick up the
+   parent's pointer — so the cursor "reverts" partway through a button. */
 @layer base {
   button:not(:disabled),
+  a[href],
   [role="button"]:not([aria-disabled="true"]),
   label[for],
   summary {
     cursor: pointer;
+  }
+
+  :where(
+    button:not(:disabled),
+    a[href],
+    [role="button"]:not([aria-disabled="true"]),
+    label[for],
+    summary
+  ) * {
+    cursor: inherit;
   }
 
   button:disabled,
