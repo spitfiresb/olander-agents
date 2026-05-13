@@ -82,27 +82,31 @@ export function MembersTable({
 
   return (
     <div>
+      {/* Save button lives outside the table card, above it, right-aligned.
+          Visible column headers were removed entirely — kept in
+          <thead className="sr-only"> so screen readers still get column
+          context when navigating the cells. */}
+      <div className="mb-2 flex justify-end">
+        <button
+          type="button"
+          onClick={save}
+          disabled={!canSave}
+          className={`rounded-md px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-1 ${
+            canSave
+              ? "bg-brand-red text-white hover:bg-brand-red/90"
+              : "cursor-not-allowed bg-brand-charcoal/10 text-brand-ink-soft"
+          }`}
+        >
+          {isSaving ? "Saving…" : "Save changes"}
+        </button>
+      </div>
       <div className="overflow-hidden rounded-2xl border border-brand-charcoal/10 bg-white">
         <table className="w-full border-collapse text-sm">
-          <thead className="bg-brand-canvas/70 text-left text-xs uppercase tracking-wider text-brand-ink-soft">
+          <thead className="sr-only">
             <tr>
-              <th className="px-3 py-2 font-semibold align-middle">Member</th>
-              <th className="px-3 py-2 font-semibold align-middle">Tier</th>
-              <th className="px-3 py-1.5 text-right align-middle">
-                <span className="sr-only">Actions</span>
-                <button
-                  type="button"
-                  onClick={save}
-                  disabled={!canSave}
-                  className={`rounded-md px-3 py-1 text-xs font-medium normal-case tracking-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-1 ${
-                    canSave
-                      ? "bg-brand-red text-white hover:bg-brand-red/90"
-                      : "cursor-not-allowed bg-brand-charcoal/10 text-brand-ink-soft"
-                  }`}
-                >
-                  {isSaving ? "Saving…" : "Save changes"}
-                </button>
-              </th>
+              <th>Member</th>
+              <th>Tier</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
