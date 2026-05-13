@@ -27,15 +27,29 @@ body {
 
 /* Clickable controls get the hand cursor. Browsers don't set this on <button>
    by default, and Tailwind v4's Preflight doesn't either — so without this
-   most buttons show the arrow cursor, and it flickers as the pointer moves
-   between a button and an adjacent link or text. Disabled controls get
-   not-allowed. In @layer base so per-element `cursor-*` utilities still win. */
+   most buttons show the arrow cursor. Disabled controls get not-allowed. In
+   @layer base so per-element `cursor-*` utilities still win.
+   The descendant rule below uses `cursor: inherit` (low-specificity via
+   `:where()`) because some elements inside buttons (icons, spans rendered by
+   Next's <Link>, etc.) can compute a different cursor and not pick up the
+   parent's pointer — so the cursor "reverts" partway through a button. */
 @layer base {
   button:not(:disabled),
+  a[href],
   [role="button"]:not([aria-disabled="true"]),
   label[for],
   summary {
     cursor: pointer;
+  }
+
+  :where(
+    button:not(:disabled),
+    a[href],
+    [role="button"]:not([aria-disabled="true"]),
+    label[for],
+    summary
+  ) * {
+    cursor: inherit;
   }
 
   button:disabled,
@@ -83,5 +97,69 @@ body {
 
   .animate-typing-dot {
     animation: typing-dot 1.2s ease-in-out infinite;
+  }
+}
+
+/* Confirm-removal modal (and any future <dialog> that wants the same
+   treatment). Centred via position:fixed + inset:0 + margin:auto — needed
+   because Tailwind's reset strips the UA-default margin:auto from
+   <dialog>. Animated via @starting-style + transition-behavior:
+   allow-discrete so the dialog and its ::backdrop transition both in
+   from display:none and back out, which would otherwise be a hard cut.
+   Backdrop colour applies regardless of motion preference; the fade/scale
+   on the card itself is gated under no-preference. */
+.confirm-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+}
+
+.confirm-dialog::backdrop {
+  background-color: rgb(45 46 41 / 0.5);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .confirm-dialog {
+    opacity: 0;
+    transform: scale(0.94) translateY(6px);
+    transition:
+      opacity 180ms ease-out,
+      transform 180ms ease-out,
+      overlay 180ms ease-out allow-discrete,
+      display 180ms ease-out allow-discrete;
+  }
+
+  .confirm-dialog[open] {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+
+  @starting-style {
+    .confirm-dialog[open] {
+      opacity: 0;
+      transform: scale(0.94) translateY(6px);
+    }
+  }
+
+  .confirm-dialog::backdrop {
+    background-color: rgb(45 46 41 / 0);
+    backdrop-filter: blur(0px);
+    transition:
+      background-color 180ms ease-out,
+      backdrop-filter 180ms ease-out,
+      overlay 180ms ease-out allow-discrete,
+      display 180ms ease-out allow-discrete;
+  }
+
+  .confirm-dialog[open]::backdrop {
+    background-color: rgb(45 46 41 / 0.5);
+    backdrop-filter: blur(2px);
+  }
+
+  @starting-style {
+    .confirm-dialog[open]::backdrop {
+      background-color: rgb(45 46 41 / 0);
+      backdrop-filter: blur(0px);
+    }
   }
 }
