@@ -126,7 +126,7 @@ export function ScopesList({
     });
   }
 
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
 
   return (
     <div>
@@ -166,19 +166,15 @@ export function ScopesList({
       <div className="mt-3 flex justify-end">
         <button
           type="button"
-          onClick={() => setDrawerOpen(true)}
+          onClick={() => setResetOpen(true)}
           className="text-xs text-brand-ink-soft underline-offset-2 hover:text-brand-charcoal hover:underline"
         >
-          Manage buckets…
+          Reset to defaults…
         </button>
       </div>
 
-      {drawerOpen ? (
-        <ManageBucketsDrawer
-          scopes={scopes}
-          onClose={() => setDrawerOpen(false)}
-          onAfterReset={() => setDrawerOpen(false)}
-        />
+      {resetOpen ? (
+        <ResetDialog onClose={() => setResetOpen(false)} />
       ) : null}
     </div>
   );
@@ -252,6 +248,7 @@ function BucketSection({
         type="button"
         onClick={onToggle}
         aria-expanded={expanded}
+        title={scope.description || undefined}
         className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-brand-sand/20"
       >
         <Chevron open={expanded} />
@@ -414,134 +411,72 @@ function MovePopover({
   );
 }
 
-// --- Manage buckets drawer (read-only summary + Reset) --------------------
+// --- Reset confirm dialog -------------------------------------------------
 
-function ManageBucketsDrawer({
-  scopes,
-  onClose,
-  onAfterReset,
-}: {
-  scopes: ScopeRow[];
-  onClose: () => void;
-  onAfterReset: () => void;
-}) {
-  const [confirming, setConfirming] = useState(false);
+function ResetDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, start] = useTransition();
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const d = dialogRef.current;
+    if (d && !d.open) d.showModal();
+  }, []);
 
   function doReset() {
     setError(null);
     start(async () => {
       try {
         await resetToDefaultsAction();
-        onAfterReset();
+        onClose();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Couldn't reset.");
       }
     });
   }
 
+  function onBackdropClick(e: React.MouseEvent<HTMLDialogElement>) {
+    if (e.target === dialogRef.current && !busy) onClose();
+  }
+
   return (
-    <div className="fixed inset-0 z-40" role="dialog" aria-modal="true">
-      <div
-        className="absolute inset-0 bg-brand-charcoal/30"
-        onClick={onClose}
-      />
-      <aside className="absolute right-0 top-0 h-full w-full max-w-md overflow-y-auto bg-white p-6 shadow-xl">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-brand-charcoal">
-            Manage buckets
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md p-1 text-brand-ink-soft hover:bg-brand-charcoal/5"
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </div>
-        <p className="mt-1 text-xs text-brand-ink-soft">
-          Read-only summary of the catalog. Adding, renaming, and deleting
-          buckets is coming soon — for now the Reset action lives here.
-        </p>
-
-        <ul className="mt-4 divide-y divide-brand-charcoal/5 rounded-lg border border-brand-charcoal/10">
-          {scopes.map((s) => (
-            <li
-              key={s.key}
-              className="flex items-center justify-between px-3 py-2 text-sm"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-medium text-brand-charcoal">
-                  {s.label}
-                </div>
-                <div className="truncate text-[11px] text-brand-ink-soft">
-                  <code className="font-mono">{s.key}</code>
-                  {s.description ? ` · ${s.description}` : ""}
-                </div>
-              </div>
-              <div className="ml-2 flex shrink-0 items-center gap-2 text-[10px] uppercase tracking-wide">
-                <span
-                  className={`rounded-full px-1.5 py-0.5 ${
-                    s.defaultForUser
-                      ? "bg-brand-charcoal/5 text-brand-ink-soft"
-                      : "bg-amber-50 text-amber-700"
-                  }`}
-                >
-                  {s.defaultForUser ? "default" : "opt-in"}
-                </span>
-                <span className="tabular-nums text-brand-ink-soft">
-                  {s.viewCount}
-                </span>
-              </div>
-            </li>
-          ))}
-        </ul>
-
-        <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
-          <div className="text-xs font-medium text-amber-900">
-            Reset to defaults
-          </div>
-          <p className="mt-1 text-[11px] text-amber-800">
-            Wipes every bucket and view mapping, then re-seeds the 10-bucket
-            base layout. Member overrides keep working for any keys that
-            survive the reset.
-          </p>
-          {error ? (
-            <p className="mt-1 text-[11px] text-brand-red">{error}</p>
-          ) : null}
-          {confirming ? (
-            <div className="mt-2 flex gap-2">
-              <button
-                type="button"
-                onClick={() => setConfirming(false)}
-                disabled={busy}
-                className="rounded-md border border-brand-charcoal/15 bg-white px-2.5 py-1 text-xs font-medium text-brand-charcoal disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={doReset}
-                disabled={busy}
-                className="rounded-md bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-60"
-              >
-                {busy ? "Resetting…" : "Confirm reset"}
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setConfirming(true)}
-              className="mt-2 rounded-md border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
-            >
-              Reset to defaults…
-            </button>
-          )}
-        </div>
-      </aside>
-    </div>
+    <dialog
+      ref={dialogRef}
+      onClose={onClose}
+      onClick={onBackdropClick}
+      className="confirm-dialog w-[calc(100%-3rem)] max-w-md rounded-2xl border border-brand-charcoal/10 bg-white p-6 shadow-2xl"
+    >
+      <h2 className="text-base font-semibold text-brand-charcoal">
+        Reset to defaults?
+      </h2>
+      <p className="mt-2 text-sm text-brand-ink-soft">
+        Wipes every bucket and view mapping, then re-seeds the 10-bucket base
+        layout. Member overrides keep working for any keys that survive the
+        reset; the rest are silently dropped on next read.
+      </p>
+      {error ? (
+        <p className="mt-3 text-sm text-brand-red">{error}</p>
+      ) : null}
+      <div className="mt-5 flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={busy}
+          className="rounded-md border border-brand-charcoal/15 bg-white px-3 py-1.5 text-sm font-medium text-brand-charcoal transition-colors hover:bg-brand-charcoal/5 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={doReset}
+          disabled={busy}
+          autoFocus
+          className="rounded-md bg-brand-red px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-brand-red/90 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {busy ? "Resetting…" : "Reset"}
+        </button>
+      </div>
+    </dialog>
   );
 }
 
