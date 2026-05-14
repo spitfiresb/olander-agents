@@ -214,7 +214,6 @@ function UnassignedCallout({
               scopes={scopes}
               onPick={(to) => onAssign(v, to)}
               variant="amber"
-              hideUnassign
             />
           </li>
         ))}
@@ -328,14 +327,12 @@ function MovePopover({
   scopes,
   onPick,
   variant = "default",
-  hideUnassign = false,
 }: {
   currentLabel: string;
   currentKey: string | null;
   scopes: ScopeRow[];
   onPick: (to: Target) => void;
   variant?: "default" | "amber";
-  hideUnassign?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -414,22 +411,6 @@ function MovePopover({
             );
           })}
         </div>
-        {!hideUnassign ? (
-          <>
-            <div className="border-t border-brand-charcoal/5" />
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setOpen(false);
-                onPick(UNASSIGNED);
-              }}
-              className="block w-full px-3 py-1.5 text-left text-amber-800 transition-colors duration-150 hover:bg-amber-50"
-            >
-              Unassign
-            </button>
-          </>
-        ) : null}
       </div>
     </div>
   );
