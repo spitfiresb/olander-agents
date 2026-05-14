@@ -1,7 +1,8 @@
+import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { BackLink } from "@/components/BackLink";
-import { ScopesBoard } from "./ScopesBoard";
+import { ScopesTable } from "./ScopesTable";
 import { loadScopesPageData } from "./data";
 
 export const dynamic = "force-dynamic";
@@ -27,12 +28,17 @@ export default async function ScopesPage() {
         </p>
 
         <div className="mt-6">
-          <ScopesBoard
-            scopes={data.scopes}
-            assignments={data.assignments}
-            unassignedViews={data.unassignedViews}
-            viewMeta={data.viewMeta}
-          />
+          {/* Suspense boundary: ScopesTable uses useSearchParams() to seed
+              the URL-backed filter state, which Next requires be inside a
+              Suspense even on force-dynamic pages. */}
+          <Suspense fallback={null}>
+            <ScopesTable
+              scopes={data.scopes}
+              assignments={data.assignments}
+              unassignedViews={data.unassignedViews}
+              viewMeta={data.viewMeta}
+            />
+          </Suspense>
         </div>
       </div>
     </div>
