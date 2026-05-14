@@ -1,12 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import {
-  ALL_SCOPES,
-  SCOPES,
-  defaultUserScopes,
-  type Scope,
-} from "@/lib/scopes";
+import type { ScopeBucket } from "@/lib/scopes";
 import { setMemberScopesAction } from "./actions";
 import type { ScopeTarget } from "./ScopePickerDialog";
 
@@ -16,22 +11,34 @@ import type { ScopeTarget } from "./ScopePickerDialog";
 // changes (which the react-hooks lint rule rejects).
 export function ScopePickerForm({
   target,
+  buckets,
+  defaultKeys,
   onCancel,
   onSaved,
 }: {
   target: ScopeTarget;
+  buckets: ScopeBucket[];
+  defaultKeys: string[];
   onCancel: () => void;
-  onSaved: (email: string, scopes: Scope[] | null) => void;
+  onSaved: (email: string, scopes: string[] | null) => void;
 }) {
   const [useDefault, setUseDefault] = useState(target.initial === null);
-  const [picked, setPicked] = useState<Set<Scope>>(
-    () => new Set(target.initial ?? defaultUserScopes()),
+  const [picked, setPicked] = useState<Set<string>>(
+    () => new Set(target.initial ?? defaultKeys),
   );
   const [error, setError] = useState<string | null>(null);
   const [saving, startSaving] = useTransition();
-  const defaults = useMemo(() => new Set(defaultUserScopes()), []);
+  const defaultSet = useMemo(() => new Set(defaultKeys), [defaultKeys]);
+  const defaultLabel = useMemo(
+    () =>
+      buckets
+        .filter((b) => defaultSet.has(b.key))
+        .map((b) => b.label)
+        .join(", "),
+    [buckets, defaultSet],
+  );
 
-  function togglePicked(s: Scope) {
+  function togglePicked(s: string) {
     setPicked((prev) => {
       const next = new Set(prev);
       if (next.has(s)) next.delete(s);
@@ -42,9 +49,9 @@ export function ScopePickerForm({
 
   function save() {
     setError(null);
-    const value: Scope[] | null = useDefault
+    const value: string[] | null = useDefault
       ? null
-      : ALL_SCOPES.filter((s) => picked.has(s));
+      : buckets.filter((b) => picked.has(b.key)).map((b) => b.key);
     startSaving(async () => {
       try {
         await setMemberScopesAction(target.email, value);
@@ -80,11 +87,7 @@ export function ScopePickerForm({
           <span className="font-medium text-brand-charcoal">
             Use tier default
           </span>
-          <span className="ml-1 text-brand-ink-soft">
-            ({defaultUserScopes()
-              .map((s) => SCOPES[s].label)
-              .join(", ")})
-          </span>
+          <span className="ml-1 text-brand-ink-soft">({defaultLabel})</span>
         </span>
       </label>
 
@@ -95,24 +98,23 @@ export function ScopePickerForm({
         <legend className="px-1 text-xs uppercase tracking-wide text-brand-ink-soft">
           Custom buckets
         </legend>
-        {ALL_SCOPES.map((s) => {
-          const meta = SCOPES[s];
-          const checked = picked.has(s);
-          const isDefault = defaults.has(s);
+        {buckets.map((b) => {
+          const checked = picked.has(b.key);
+          const isDefault = defaultSet.has(b.key);
           return (
             <label
-              key={s}
+              key={b.key}
               className="flex items-start gap-2 rounded-md px-1 py-1 text-sm hover:bg-brand-sand/30"
             >
               <input
                 type="checkbox"
                 checked={checked}
-                onChange={() => togglePicked(s)}
+                onChange={() => togglePicked(b.key)}
                 className="mt-0.5 h-4 w-4 accent-brand-red"
               />
               <span>
                 <span className="font-medium text-brand-charcoal">
-                  {meta.label}
+                  {b.label}
                 </span>
                 {!isDefault ? (
                   <span className="ml-2 rounded-full bg-brand-red/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-brand-red">
@@ -120,7 +122,7 @@ export function ScopePickerForm({
                   </span>
                 ) : null}
                 <span className="block text-[12px] text-brand-ink-soft">
-                  {meta.description}
+                  {b.description}
                 </span>
               </span>
             </label>

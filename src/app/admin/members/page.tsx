@@ -2,6 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { normalizeEmail } from "@/lib/auth-allowlist";
 import { listMembers } from "@/lib/members";
+import { bucketsFromCatalog, loadScopeCatalog } from "@/lib/scopes";
 import { BackLink } from "@/components/BackLink";
 import { AddMemberForm } from "./AddMemberForm";
 import { MembersTable } from "./MembersTable";
@@ -14,7 +15,11 @@ export default async function MembersPage() {
   if (session.user.role !== "admin") notFound();
 
   const myEmail = session.user.email ? normalizeEmail(session.user.email) : null;
-  const members = await listMembers();
+  const [members, catalog] = await Promise.all([
+    listMembers(),
+    loadScopeCatalog(),
+  ]);
+  const buckets = bucketsFromCatalog(catalog);
 
   return (
     <div className="min-h-dvh bg-brand-canvas">
@@ -30,7 +35,11 @@ export default async function MembersPage() {
         </div>
 
         <div className="mt-6">
-          <MembersTable members={members} myEmail={myEmail} />
+          <MembersTable
+            members={members}
+            myEmail={myEmail}
+            buckets={buckets}
+          />
         </div>
       </div>
     </div>

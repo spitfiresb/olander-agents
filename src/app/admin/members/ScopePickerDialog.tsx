@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { type Scope } from "@/lib/scopes";
+import type { ScopeBucket } from "@/lib/scopes";
 import { ScopePickerForm } from "./ScopePickerForm";
 
 // Per-member data-access editor. Opened from MembersTable when an admin
@@ -13,18 +13,23 @@ import { ScopePickerForm } from "./ScopePickerForm";
 export type ScopeTarget = {
   email: string;
   label: string;
-  // null = "use tier default" (the set flagged defaultForUser in scopes.ts).
-  initial: Scope[] | null;
+  // null = "use tier default" (the set of buckets flagged defaultForUser in
+  // the live catalog).
+  initial: string[] | null;
 };
 
 export function ScopePickerDialog({
   target,
+  buckets,
+  defaultKeys,
   onClose,
   onSaved,
 }: {
   target: ScopeTarget | null;
+  buckets: ScopeBucket[];
+  defaultKeys: string[];
   onClose: () => void;
-  onSaved: (email: string, scopes: Scope[] | null) => void;
+  onSaved: (email: string, scopes: string[] | null) => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -56,6 +61,8 @@ export function ScopePickerDialog({
         <ScopePickerForm
           key={target.email}
           target={target}
+          buckets={buckets}
+          defaultKeys={defaultKeys}
           onCancel={onClose}
           onSaved={onSaved}
         />

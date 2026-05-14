@@ -4,26 +4,33 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { removeMemberAction, setTiersAction } from "./actions";
 import { TierDropdown, type Tier } from "./TierDropdown";
 import { ScopePickerDialog, type ScopeTarget } from "./ScopePickerDialog";
-import {
-  SCOPES,
-  defaultUserScopes,
-  type Scope,
-} from "@/lib/scopes";
+import type { ScopeBucket } from "@/lib/scopes";
 
 type Member = {
   email: string;
   name: string | null;
   role: Tier;
-  dataScopes: Scope[] | null;
+  dataScopes: string[] | null;
 };
 
 export function MembersTable({
   members,
   myEmail,
+  buckets,
 }: {
   members: Member[];
   myEmail: string | null;
+  buckets: ScopeBucket[];
 }) {
+  // Index by key for fast label lookup, plus the precomputed default-on set.
+  const bucketByKey = useMemo(
+    () => new Map(buckets.map((b) => [b.key, b])),
+    [buckets],
+  );
+  const defaultKeys = useMemo(
+    () => buckets.filter((b) => b.defaultForUser).map((b) => b.key),
+    [buckets],
+  );
   const serverRole = useMemo(
     () => new Map(members.map((m) => [m.email, m.role])),
     [members],
@@ -32,7 +39,7 @@ export function MembersTable({
   // without waiting for the page to revalidate. Saves replace the entry; an
   // entry missing from the map falls back to the server-provided value.
   const [scopeOverrides, setScopeOverrides] = useState<
-    Record<string, Scope[] | null>
+    Record<string, string[] | null>
   >({});
   const [scopeTarget, setScopeTarget] = useState<ScopeTarget | null>(null);
   // Pending (toggled-but-not-saved) tiers, by email. An entry that matches the
@@ -233,6 +240,8 @@ export function MembersTable({
                       effectiveTier={tier}
                       override={scopeOverrides[m.email]}
                       disabled={busy}
+                      bucketByKey={bucketByKey}
+                      defaultKeys={defaultKeys}
                       onEdit={() =>
                         setScopeTarget({
                           email: m.email,
@@ -326,6 +335,8 @@ export function MembersTable({
 
       <ScopePickerDialog
         target={scopeTarget}
+        buckets={buckets}
+        defaultKeys={defaultKeys}
         onClose={() => setScopeTarget(null)}
         onSaved={(email, scopes) => {
           setScopeOverrides((p) => ({ ...p, [email]: scopes }));
@@ -346,12 +357,16 @@ function ScopeCell({
   effectiveTier,
   override,
   disabled,
+  bucketByKey,
+  defaultKeys,
   onEdit,
 }: {
   member: Member;
   effectiveTier: Tier;
-  override: Scope[] | null | undefined;
+  override: string[] | null | undefined;
   disabled: boolean;
+  bucketByKey: Map<string, ScopeBucket>;
+  defaultKeys: string[];
   onEdit: () => void;
 }) {
   if (effectiveTier === "admin") {
@@ -361,15 +376,16 @@ function ScopeCell({
       </span>
     );
   }
+  const labelFor = (k: string) => bucketByKey.get(k)?.label ?? k;
   // override === undefined → no recent save, use the server's value.
   const current = override === undefined ? member.dataScopes : override;
   const summary = (() => {
     if (current === null) {
-      const n = defaultUserScopes().length;
+      const n = defaultKeys.length;
       return `Tier default · ${n} bucket${n === 1 ? "" : "s"}`;
     }
     if (current.length === 0) return "No access";
-    const labels = current.map((s) => SCOPES[s].label);
+    const labels = current.map(labelFor);
     if (labels.length <= 2) return labels.join(", ");
     return `${labels.length} buckets`;
   })();
@@ -381,12 +397,10 @@ function ScopeCell({
       className="inline-flex items-center gap-2 rounded-md border border-brand-charcoal/15 bg-white px-2.5 py-1 text-xs text-brand-charcoal transition-colors hover:border-brand-charcoal/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red disabled:cursor-not-allowed disabled:opacity-50"
       title={
         current === null
-          ? `Default buckets: ${defaultUserScopes()
-              .map((s) => SCOPES[s].label)
-              .join(", ")}`
+          ? `Default buckets: ${defaultKeys.map(labelFor).join(", ")}`
           : current.length === 0
             ? "No P21 data access"
-            : current.map((s) => SCOPES[s].label).join(", ")
+            : current.map(labelFor).join(", ")
       }
     >
       <span>{summary}</span>

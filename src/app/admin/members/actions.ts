@@ -10,7 +10,7 @@ import {
   setMemberRole,
   setMemberScopes,
 } from "@/lib/members";
-import { ALL_SCOPES, type Scope } from "@/lib/scopes";
+import { loadScopeCatalog } from "@/lib/scopes";
 
 // Server actions behind /admin/members. Every one re-checks the admin role
 // server-side — the disabled controls in the UI are a courtesy, not the gate.
@@ -88,18 +88,20 @@ export async function setTiersAction(
 // scopes" (every P21 view/entity call is denied). Admins are a no-op — they
 // bypass the scope check regardless — but we still write the row so the admin
 // UI reflects the choice if the user is later demoted.
-const scopeNameSchema = z.enum(ALL_SCOPES as [Scope, ...Scope[]]);
-
 export async function setMemberScopesAction(
   email: string,
-  scopes: Scope[] | null,
+  scopes: string[] | null,
 ): Promise<void> {
   await requireAdmin();
   const e = normalizeEmail(emailSchema.parse(email));
-  const cleaned =
-    scopes === null
-      ? null
-      : z.array(scopeNameSchema).parse(scopes);
+  let cleaned: string[] | null = null;
+  if (scopes !== null) {
+    const parsed = z.array(z.string().min(1).max(64)).parse(scopes);
+    // Validate against the live catalog so a stale client (older bundle that
+    // still knows about a since-deleted scope) can't write a phantom key.
+    const catalog = await loadScopeCatalog();
+    cleaned = parsed.filter((k) => catalog.scopes.has(k));
+  }
   await setMemberScopes(e, cleaned);
   revalidatePath("/admin/members");
 }

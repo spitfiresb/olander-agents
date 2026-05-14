@@ -6,8 +6,8 @@ import { qdrantConfigured, searchCatalogByVector } from "@/lib/ai/qdrant";
 import {
   isEntityAllowed,
   isViewAllowed,
-  SCOPES,
   type EffectiveScopes,
+  type ScopeCatalog,
 } from "@/lib/scopes";
 
 // Layer 3 chatbot tools. Both call the Layer 2 proxy on the droplet, which:
@@ -111,14 +111,14 @@ function denyForView(decision: ReturnType<typeof isViewAllowed>): ScopeDenied {
       error: "uncategorized_resource",
       resource: decision.resource,
       detail:
-        "This view is not categorized into any data-access scope. Ask an admin to map it in src/lib/scopes.ts.",
+        "This view is not categorized into any data-access scope. Ask an admin to map it at /admin/scopes.",
     };
   }
   return {
     error: "scope_denied",
     resource: decision.resource,
     scope_required: decision.scope,
-    scope_label: SCOPES[decision.scope].label,
+    scope_label: decision.scopeLabel,
   };
 }
 
@@ -131,18 +131,18 @@ function denyForEntity(
       error: "uncategorized_resource",
       resource: decision.resource,
       detail:
-        "This entity route is not categorized into any data-access scope. Ask an admin to map it in src/lib/scopes.ts.",
+        "This entity route is not categorized into any data-access scope. Ask an admin to map it at /admin/scopes.",
     };
   }
   return {
     error: "scope_denied",
     resource: decision.resource,
     scope_required: decision.scope,
-    scope_label: SCOPES[decision.scope].label,
+    scope_label: decision.scopeLabel,
   };
 }
 
-function makeViewsQuery(scopes: EffectiveScopes) {
+function makeViewsQuery(scopes: EffectiveScopes, catalog: ScopeCatalog) {
   return tool({
   description:
     "Run a filtered, projected, sorted query against a P21 SQL view via the droplet proxy. " +
@@ -186,7 +186,7 @@ function makeViewsQuery(scopes: EffectiveScopes) {
     ),
   }),
   execute: async (input) => {
-    const decision = isViewAllowed(input.viewName, scopes);
+    const decision = isViewAllowed(input.viewName, scopes, catalog);
     if (!decision.ok) return denyForView(decision);
     const result = await callProxy("POST", `/proxy/views/${encodeURIComponent(input.viewName)}`, {
       filter: input.filter,
@@ -200,7 +200,7 @@ function makeViewsQuery(scopes: EffectiveScopes) {
   });
 }
 
-function makeDescribeView(scopes: EffectiveScopes) {
+function makeDescribeView(scopes: EffectiveScopes, catalog: ScopeCatalog) {
   return tool({
     description:
       "List a P21 SQL view's columns + types. Call this BEFORE viewsQuery " +
@@ -218,7 +218,7 @@ function makeDescribeView(scopes: EffectiveScopes) {
         ),
     }),
     execute: async ({ viewName }) => {
-      const decision = isViewAllowed(viewName, scopes);
+      const decision = isViewAllowed(viewName, scopes, catalog);
       if (!decision.ok) return denyForView(decision);
       const view = getViewSchema(viewName);
       if (!view) {
@@ -244,7 +244,7 @@ const SAFE_ID = z
   .max(64)
   .regex(/^[A-Za-z0-9._-]+$/, "id must be alphanumeric (dash/dot/underscore allowed)");
 
-function makeEntityGet(scopes: EffectiveScopes) {
+function makeEntityGet(scopes: EffectiveScopes, catalog: ScopeCatalog) {
   return tool({
   description:
     "Fetch a single full P21 entity record by ID via the droplet proxy. " +
@@ -276,7 +276,7 @@ function makeEntityGet(scopes: EffectiveScopes) {
       .describe("Optional endpoint-specific value to fetch related sub-objects in one call."),
   }),
   execute: async ({ area, resource, id, extendedProperties }) => {
-    const decision = isEntityAllowed(area, resource, scopes);
+    const decision = isEntityAllowed(area, resource, scopes, catalog);
     if (!decision.ok) return denyForEntity(decision);
     const query = extendedProperties
       ? `?extendedProperties=${encodeURIComponent(extendedProperties)}`
@@ -330,7 +330,7 @@ export const searchCatalogInputSchema = z.object({
   topK: z.number().int().min(1).max(20).default(5),
 });
 
-function makeSearchCatalog(scopes: EffectiveScopes) {
+function makeSearchCatalog(scopes: EffectiveScopes, catalog: ScopeCatalog) {
   return tool({
   description:
     "Semantic search over Olander's parts catalog (the inventory master). Use this " +
@@ -347,10 +347,10 @@ function makeSearchCatalog(scopes: EffectiveScopes) {
     query,
     topK,
   }): Promise<{ matches: SearchMatch[] } | SearchError | ScopeDenied> => {
-    // The catalog index is sourced from p21_view_inv_mast — gate it on the
-    // inventory scope so a member without inventory access can't bypass the
-    // viewsQuery check via the semantic-search path.
-    const decision = isViewAllowed("p21_view_inv_mast", scopes);
+    // The catalog index is sourced from p21_view_inv_mast — gate it on
+    // whatever scope that view currently lives in so a member without that
+    // scope can't bypass the viewsQuery check via the semantic-search path.
+    const decision = isViewAllowed("p21_view_inv_mast", scopes, catalog);
     if (!decision.ok) return denyForView(decision);
     if (!process.env.VOYAGE_API_KEY || !qdrantConfigured()) {
       return { error: "search_not_configured" };
@@ -387,13 +387,14 @@ function makeSearchCatalog(scopes: EffectiveScopes) {
 }
 
 // Build the tool set for a single chat request. Pass the caller's effective
-// scopes ("all" for admins) — every tool's execute path runs the scope check
-// before any I/O, so a denied call costs no proxy / Qdrant / Voyage round-trip.
-export function buildTools(scopes: EffectiveScopes) {
+// scopes ("all" for admins) along with the ScopeCatalog snapshot loaded at
+// request entry — every tool's execute path runs the scope check before any
+// I/O, so a denied call costs no proxy / Qdrant / Voyage round-trip.
+export function buildTools(scopes: EffectiveScopes, catalog: ScopeCatalog) {
   return {
-    viewsQuery: makeViewsQuery(scopes),
-    describeView: makeDescribeView(scopes),
-    entityGet: makeEntityGet(scopes),
-    searchCatalog: makeSearchCatalog(scopes),
+    viewsQuery: makeViewsQuery(scopes, catalog),
+    describeView: makeDescribeView(scopes, catalog),
+    entityGet: makeEntityGet(scopes, catalog),
+    searchCatalog: makeSearchCatalog(scopes, catalog),
   } as const;
 }

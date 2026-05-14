@@ -10,7 +10,7 @@ import { SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
 import { buildTools } from "@/lib/ai/tools";
 import { isExcelMimeType, ownsAttachmentUrl } from "@/lib/blob";
 import { fetchAndConvertExcel } from "@/lib/excel";
-import { effectiveScopes } from "@/lib/scopes";
+import { effectiveScopes, loadScopeCatalog } from "@/lib/scopes";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { isSameOrigin } from "@/lib/csrf";
 import {
@@ -162,8 +162,15 @@ export async function POST(req: Request) {
   // Resolve the caller's data-access scopes once per request. Dev-bypass +
   // no session = "all" so local probes still hit P21; otherwise we read the
   // session's role + per-member scope override and feed it into buildTools.
+  // The scope catalog is loaded from DB once here and threaded through every
+  // tool so each execute() can run the allow check without another query.
+  const scopeCatalog = await loadScopeCatalog();
   const scopes = session?.user
-    ? effectiveScopes(session.user.role, session.user.dataScopes ?? null)
+    ? effectiveScopes(
+        session.user.role,
+        session.user.dataScopes ?? null,
+        scopeCatalog,
+      )
     : "all";
 
   // Per-user (or per-IP fallback) message-rate cap. 20/min with bursts up to
@@ -320,7 +327,7 @@ export async function POST(req: Request) {
       },
     },
     messages: await convertToModelMessages(modelFacingMessages as UIMessage[]),
-    tools: buildTools(scopes),
+    tools: buildTools(scopes, scopeCatalog),
     temperature: MODEL_TEMPERATURE,
     maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS,
     // 10 steps = enough headroom for: describeView → multi-step viewsQuery

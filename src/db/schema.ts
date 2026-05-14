@@ -7,6 +7,7 @@ import {
   jsonb,
   index,
   boolean,
+  serial,
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
 
@@ -201,6 +202,63 @@ export const catalogItem = pgTable("catalog_item", {
     .notNull()
     .defaultNow(),
 });
+
+// --- Data-access scopes ----------------------------------------------------
+// Three tables hold the editable scope catalog the admin UI manages at
+// /admin/scopes. They replace the hardcoded tables that used to live in
+// src/lib/scopes.ts. Stored as data so admins can rename, regroup, add, and
+// delete scopes without code changes. The seed in drizzle/0007_*.sql lays
+// down a 10-scope base layout grounded in the live P21 schema dump; the same
+// defaults live in src/lib/scope-defaults.ts so the admin UI's "Reset to
+// defaults" can rebuild them.
+//
+// `key` is immutable and is what member.dataScopes stores (so renaming the
+// human-facing label is free, but the key never changes). `label` and
+// `description` are what the admin UI shows. `defaultForUser` decides
+// whether the scope is granted to a non-admin member who has no per-member
+// dataScopes override. `sortOrder` controls UI ordering.
+export const scopes = pgTable("scope", {
+  id: serial("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  label: text("label").notNull(),
+  description: text("description").notNull().default(""),
+  defaultForUser: boolean("defaultForUser").notNull().default(false),
+  sortOrder: integer("sortOrder").notNull().default(0),
+  createdAt: timestamp("createdAt", { mode: "date", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// One row per P21 view, mapping it to exactly one scope. Views with no row
+// here are uncategorized → denied for non-admins (deny-by-default).
+export const scopeViews = pgTable(
+  "scope_view",
+  {
+    viewName: text("viewName").primaryKey(),
+    scopeId: integer("scopeId")
+      .notNull()
+      .references(() => scopes.id, { onDelete: "cascade" }),
+  },
+  (t) => [index("scope_view_scope_idx").on(t.scopeId)],
+);
+
+// Entity REST routes (/api/<area>/<resource>/...). An empty `resource`
+// means "all routes under this area"; non-empty matches the area+resource
+// prefix exactly. See scopeForEntity in src/lib/scopes.ts.
+export const scopeEntities = pgTable(
+  "scope_entity",
+  {
+    area: text("area").notNull(),
+    resource: text("resource").notNull().default(""),
+    scopeId: integer("scopeId")
+      .notNull()
+      .references(() => scopes.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.area, t.resource] }),
+    index("scope_entity_scope_idx").on(t.scopeId),
+  ],
+);
 
 // Flattened audit log of tool calls — denormalized from messages.parts so
 // /admin/audit can grep without loading every assistant message.
