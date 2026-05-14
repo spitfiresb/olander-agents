@@ -167,7 +167,7 @@ export function ScopesList({
         <button
           type="button"
           onClick={() => setResetOpen(true)}
-          className="text-xs text-brand-ink-soft underline-offset-2 hover:text-brand-charcoal hover:underline"
+          className="inline-flex items-center rounded-full border border-brand-charcoal/15 bg-white px-3 py-1 text-xs font-medium text-brand-ink-soft shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-red/40 hover:bg-brand-red/5 hover:text-brand-red hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-1"
         >
           Reset to defaults…
         </button>
@@ -249,7 +249,7 @@ function BucketSection({
         onClick={onToggle}
         aria-expanded={expanded}
         title={scope.description || undefined}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-brand-sand/20"
+        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors duration-200 hover:bg-brand-sand/40 focus-visible:bg-brand-sand/40 focus-visible:outline-none"
       >
         <Chevron open={expanded} />
         <span className="flex-1 truncate text-sm font-medium text-brand-charcoal">
@@ -340,17 +340,23 @@ function MovePopover({
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
+  // Pill triggers — animated hover for color + shadow, but no translate
+  // because the popover anchors absolute below them and shifting the button
+  // would shift the popover with it.
   const triggerClass =
     variant === "amber"
-      ? "border-amber-300 bg-white text-amber-800 hover:bg-amber-100"
-      : "border-brand-charcoal/15 bg-white text-brand-charcoal hover:border-brand-charcoal/30";
+      ? "border-amber-300 bg-white text-amber-800 hover:border-amber-400 hover:bg-amber-100 hover:shadow-sm focus-visible:ring-amber-500"
+      : "border-brand-charcoal/15 bg-white text-brand-charcoal hover:border-brand-red/40 hover:bg-brand-red/5 hover:text-brand-red hover:shadow-sm focus-visible:ring-brand-red";
 
   return (
     <div ref={ref} className="relative shrink-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors ${triggerClass}`}
+        className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 ${triggerClass} ${
+          open ? "shadow-sm" : ""
+        }`}
+        aria-expanded={open}
       >
         <span>{currentLabel}</span>
         <Caret />
