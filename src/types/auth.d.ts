@@ -6,10 +6,14 @@ declare module "next-auth" {
     user: {
       id: string;
       role: Role;
+      // null = "use the tier default" (resolved against src/lib/scopes.ts at
+      // call time). Admins bypass scope checks entirely regardless of value.
+      dataScopes: string[] | null;
     } & DefaultSession["user"];
   }
 
   interface User {
     role: Role;
+    dataScopes: string[] | null;
   }
 }

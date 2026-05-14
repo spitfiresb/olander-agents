@@ -29,6 +29,11 @@ export const users = pgTable("user", {
   emailVerified: timestamp("emailVerified", { mode: "date" }),
   image: text("image"),
   role: text("role").$type<Role>().notNull().default("user"),
+  // Per-user override of data scopes (P21 view buckets the chatbot may query).
+  // null = "use the tier default" (the set of scopes flagged defaultForUser in
+  // src/lib/scopes.ts). Mirrored from `member.dataScopes` on every login by
+  // events.signIn in src/auth.ts. Admins bypass scope checks entirely.
+  dataScopes: jsonb("dataScopes").$type<string[] | null>(),
 });
 
 export const accounts = pgTable(
@@ -83,6 +88,11 @@ export const verificationTokens = pgTable(
 export const members = pgTable("member", {
   email: text("email").primaryKey(),
   role: text("role").$type<Role>().notNull().default("user"),
+  // Per-member override of data scopes. null = "use the tier default". An
+  // explicit empty array means "no data scopes" (the member can sign in but
+  // every P21 view/entity call is denied). Admin tier bypasses regardless.
+  // See src/lib/scopes.ts for the scope catalog and the view→scope rules.
+  dataScopes: jsonb("dataScopes").$type<string[] | null>(),
   addedBy: text("addedBy"),
   createdAt: timestamp("createdAt", { mode: "date", withTimezone: true })
     .notNull()

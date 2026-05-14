@@ -50,6 +50,13 @@
       "when": 1779081039339,
       "tag": "0006_slippery_silhouette",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1779081100000,
+      "tag": "0007_warm_bill_hollister",
+      "breakpoints": true
     }
   ]
 }

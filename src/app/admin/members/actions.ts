@@ -4,7 +4,13 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { normalizeEmail } from "@/lib/auth-allowlist";
-import { addMember, listMembers, setMemberRole } from "@/lib/members";
+import {
+  addMember,
+  listMembers,
+  setMemberRole,
+  setMemberScopes,
+} from "@/lib/members";
+import { ALL_SCOPES, type Scope } from "@/lib/scopes";
 
 // Server actions behind /admin/members. Every one re-checks the admin role
 // server-side — the disabled controls in the UI are a courtesy, not the gate.
@@ -74,6 +80,27 @@ export async function setTiersAction(
   for (const c of normalized) {
     await setMemberRole(c.email, c.role);
   }
+  revalidatePath("/admin/members");
+}
+
+// Set the per-member data-scope override. `scopes === null` clears the
+// override and falls back to the tier default; an empty array means "no
+// scopes" (every P21 view/entity call is denied). Admins are a no-op — they
+// bypass the scope check regardless — but we still write the row so the admin
+// UI reflects the choice if the user is later demoted.
+const scopeNameSchema = z.enum(ALL_SCOPES as [Scope, ...Scope[]]);
+
+export async function setMemberScopesAction(
+  email: string,
+  scopes: Scope[] | null,
+): Promise<void> {
+  await requireAdmin();
+  const e = normalizeEmail(emailSchema.parse(email));
+  const cleaned =
+    scopes === null
+      ? null
+      : z.array(scopeNameSchema).parse(scopes);
+  await setMemberScopes(e, cleaned);
   revalidatePath("/admin/members");
 }
 

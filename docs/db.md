@@ -41,11 +41,11 @@ Defined in `src/db/schema.ts`. Core tables (the chat-persistence tables — `con
 
 | Table | Purpose |
 |---|---|
-| `user` | One row per signed-in human. `role` (`'admin' \| 'user' \| 'revoked'`) drives tier gating; it is *reconciled from* `member.role` on every login (see [Sign-in allowlist](#sign-in-allowlist)) — `member` is the source of truth |
+| `user` | One row per signed-in human. `role` (`'admin' \| 'user' \| 'revoked'`) drives tier gating; it is *reconciled from* `member.role` on every login (see [Sign-in allowlist](#sign-in-allowlist)) — `member` is the source of truth. `dataScopes` mirrors `member.dataScopes` (also reconciled at login) and is what `/api/chat` reads from the session to gate P21 tool calls |
 | `account` | OAuth provider linkage (Microsoft Entra today). Composite PK on `(provider, providerAccountId)` |
 | `session` | DB-backed session tokens (we use the database session strategy, not JWT) |
 | `verificationToken` | Magic-link / email verification tokens. Unused with Entra-only sign-in but the adapter requires the table |
-| `member` | Sign-in allowlist: one row per email permitted to sign in, plus its tier. PK on `email` (lowercased). `addedBy` = the admin's `user.id` (null for migration-seeded/backfilled rows; not an FK on purpose). Reads/writes via `src/lib/members.ts`; managed at `/admin/members`. See [Sign-in allowlist](#sign-in-allowlist) |
+| `member` | Sign-in allowlist: one row per email permitted to sign in, plus its tier. PK on `email` (lowercased). `addedBy` = the admin's `user.id` (null for migration-seeded/backfilled rows; not an FK on purpose). `dataScopes` (jsonb, nullable) is a per-member override of which P21 data buckets the chatbot may query for them — null means "use the tier default" (see `src/lib/scopes.ts`). Reads/writes via `src/lib/members.ts`; managed at `/admin/members`. See [Sign-in allowlist](#sign-in-allowlist) |
 
 Two intentional design calls worth knowing:
 
@@ -65,9 +65,20 @@ Tiers (`member.role`, mirrored onto `user.role`):
 - `admin` — also sees `/admin/*` (audit, usage, members).
 - `revoked` — blocked from everything: `signIn` denies them, and setting `revoked` (the "Remove user" button in `/admin/members`) immediately deletes their `session` rows so any live session ends now. Their `user` row, conversations, and tool-call audit history are kept. The row stays in the table but is hidden from `/admin/members` — re-add the email there to restore access (`addMember` upserts). `src/auth.ts` exports `activeSession()` (= `auth()` but returns null for `revoked`) which the chat pages/routes use as a backstop for the revoke-vs-session-delete race window.
 
-`events.signIn` in `src/auth.ts` reconciles `user.role` from `member.role` on **every** login — the adapter creates a new `user` row with the schema default (`user`), so this is what actually applies an `admin` tier to someone an admin invited before they ever signed in, and it self-heals after any later tier change.
+`events.signIn` in `src/auth.ts` reconciles `user.role` **and** `user.dataScopes` from `member.role` / `member.dataScopes` on **every** login — the adapter creates a new `user` row with the schema default (`user`), so this is what actually applies an `admin` tier (or a per-member scope override) to someone an admin invited before they ever signed in, and it self-heals after any later change.
 
-The `0002` migration creates `member`, backfills it from existing `user` rows (so nobody currently signed in is locked out by the switch from a domain allowlist), and seeds the project owners as bootstrap admins. Verify with `SELECT email, role FROM member ORDER BY "createdAt"`.
+### Per-member data scopes (`dataScopes`)
+
+The `member.dataScopes` column gates which P21 data the chatbot will let that user query — independent of the tier. Mirrored onto `user.dataScopes` at login; `/api/chat` reads it off the session and feeds it to `buildTools(scopes)` so the scope check fires before any P21 / Qdrant call.
+
+- **Scope catalog and view→scope rules live in `src/lib/scopes.ts`.** Currently: `inventory`, `customers`, `sales`, `vendors`, `purchasing`, `financials`, `hr_payroll`.
+- **Admins bypass.** Tier `admin` is always treated as `"all"` — `dataScopes` on an admin row is informational only and only matters if they're later demoted.
+- **null = "use tier default"** (the buckets flagged `defaultForUser: true` in `SCOPES`). The default set is everything operational; `financials` and `hr_payroll` are opt-in.
+- **Empty array (`[]`) = "no access"** — the user can sign in but every `viewsQuery`/`entityGet`/`searchCatalog` call returns `scope_denied`.
+- **Uncategorized views are denied for non-admins.** Adding a new P21 view to the chat surface means adding a `VIEW_RULES` entry in `scopes.ts` in the same PR.
+- **Managed at `/admin/members`** — the "Data access" cell on each row opens a picker with checkboxes for the scopes; saves through `setMemberScopesAction`. See `TESTING.md` § "When you change `src/lib/scopes.ts`".
+
+The `0002` migration creates `member`, backfills it from existing `user` rows (so nobody currently signed in is locked out by the switch from a domain allowlist), and seeds the project owners as bootstrap admins. Verify with `SELECT email, role FROM member ORDER BY "createdAt"`. The `0006` migration adds the `dataScopes` columns to `member` and `user` (both nullable, jsonb arrays of scope name strings).
 
 ### The `neon_auth` schema (Vercel integration extra)
 

@@ -49,6 +49,18 @@ Update this file when a new class of regression bites us. Promote sections up th
 - [ ] "Remove user" still goes through `setMemberRole(email, "revoked")` — deletes that user's `session` rows and sets `user.role = "revoked"`; the row stays but `listMembers` (which filters out `revoked`) hides it; re-adding the email restores it.
 - [ ] `npm test` covers `normalizeEmail` / `parseBootstrapAdmins` / `evaluateTenant` (the DB-touching `members.ts` isn't unit-tested by design — same reason `auth-allowlist.ts` is split out).
 
+### When you change `src/lib/scopes.ts` or the data-access plumbing
+**Surface:** `src/lib/scopes.ts`, `src/lib/ai/tools.ts` (`buildTools`), `src/app/api/chat/route.ts`, `src/app/admin/members/ScopePickerDialog.tsx`, `member.dataScopes` + `user.dataScopes` columns.
+
+- [ ] Admin tier still bypasses (`effectiveScopes("admin", _) === "all"`); admins keep `viewsQuery`/`entityGet` on every view.
+- [ ] Default non-admin scopes still cover inventory, customers, sales, vendors, purchasing — and exclude `financials` + `hr_payroll`. The point of the model is that signing in as a normal user does **not** expose AR/AP/GL/payroll without an admin opt-in.
+- [ ] Deny-by-default for uncategorized views — a fresh `p21_view_*` you haven't slotted into `VIEW_RULES` is denied for non-admins. When you add a new view to `system-prompt.ts` or tool examples, add the matching rule in `scopes.ts` in the same PR or non-admin chat breaks for that view.
+- [ ] `searchCatalog` still gates on the inventory scope (it reads `p21_view_inv_mast` data — bypassing it via the semantic-search path is the obvious hole).
+- [ ] `events.signIn` in `src/auth.ts` still mirrors `member.dataScopes` onto `user.dataScopes` on every login (otherwise per-member overrides only land after the user signs in *again*).
+- [ ] `session.user.dataScopes` is still surfaced in the session callback — `/api/chat` reads it directly without a second DB hit.
+- [ ] `setMemberScopesAction` still re-checks `requireAdmin()` server-side.
+- [ ] `npm test` covers `scopes.ts` (bucketing, default user, admin bypass, uncategorized denial).
+
 ---
 
 ## 2. Chat (core product — 3 fix commits)

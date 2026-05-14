@@ -3,8 +3,19 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { removeMemberAction, setTiersAction } from "./actions";
 import { TierDropdown, type Tier } from "./TierDropdown";
+import { ScopePickerDialog, type ScopeTarget } from "./ScopePickerDialog";
+import {
+  SCOPES,
+  defaultUserScopes,
+  type Scope,
+} from "@/lib/scopes";
 
-type Member = { email: string; name: string | null; role: Tier };
+type Member = {
+  email: string;
+  name: string | null;
+  role: Tier;
+  dataScopes: Scope[] | null;
+};
 
 export function MembersTable({
   members,
@@ -17,6 +28,13 @@ export function MembersTable({
     () => new Map(members.map((m) => [m.email, m.role])),
     [members],
   );
+  // Local mirror of dataScopes so the picker can show the latest value
+  // without waiting for the page to revalidate. Saves replace the entry; an
+  // entry missing from the map falls back to the server-provided value.
+  const [scopeOverrides, setScopeOverrides] = useState<
+    Record<string, Scope[] | null>
+  >({});
+  const [scopeTarget, setScopeTarget] = useState<ScopeTarget | null>(null);
   // Pending (toggled-but-not-saved) tiers, by email. An entry that matches the
   // current server value — including after a save lands — counts as not-dirty.
   const [pending, setPending] = useState<Record<string, Tier>>({});
@@ -173,6 +191,7 @@ export function MembersTable({
             <tr>
               <th>Member</th>
               <th>Tier</th>
+              <th>Data access</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -208,6 +227,24 @@ export function MembersTable({
                       disabled={isSelf || busy}
                     />
                   </td>
+                  <td className="px-3 py-2 align-middle">
+                    <ScopeCell
+                      member={m}
+                      effectiveTier={tier}
+                      override={scopeOverrides[m.email]}
+                      disabled={busy}
+                      onEdit={() =>
+                        setScopeTarget({
+                          email: m.email,
+                          label: m.name ?? m.email,
+                          initial:
+                            m.email in scopeOverrides
+                              ? scopeOverrides[m.email]
+                              : m.dataScopes,
+                        })
+                      }
+                    />
+                  </td>
                   <td className="px-3 py-2 text-right align-middle">
                     <button
                       type="button"
@@ -224,7 +261,7 @@ export function MembersTable({
             {members.length === 0 && (
               <tr>
                 <td
-                  colSpan={3}
+                  colSpan={4}
                   className="px-3 py-6 text-center text-sm text-brand-ink-soft"
                 >
                   No members yet. Add one above.
@@ -286,6 +323,76 @@ export function MembersTable({
           </div>
         ) : null}
       </dialog>
+
+      <ScopePickerDialog
+        target={scopeTarget}
+        onClose={() => setScopeTarget(null)}
+        onSaved={(email, scopes) => {
+          setScopeOverrides((p) => ({ ...p, [email]: scopes }));
+          setScopeTarget(null);
+        }}
+      />
     </div>
+  );
+}
+
+// Per-row summary + edit button for data-access scopes. Admin rows skip the
+// button entirely — admins bypass scope checks. Regular rows show either the
+// active bucket count or the tier-default label, then an edit button that
+// opens the picker. The override prop lets us reflect just-saved changes
+// before the page revalidates.
+function ScopeCell({
+  member,
+  effectiveTier,
+  override,
+  disabled,
+  onEdit,
+}: {
+  member: Member;
+  effectiveTier: Tier;
+  override: Scope[] | null | undefined;
+  disabled: boolean;
+  onEdit: () => void;
+}) {
+  if (effectiveTier === "admin") {
+    return (
+      <span className="text-xs uppercase tracking-wide text-brand-ink-soft">
+        Full access
+      </span>
+    );
+  }
+  // override === undefined → no recent save, use the server's value.
+  const current = override === undefined ? member.dataScopes : override;
+  const summary = (() => {
+    if (current === null) {
+      const n = defaultUserScopes().length;
+      return `Tier default · ${n} bucket${n === 1 ? "" : "s"}`;
+    }
+    if (current.length === 0) return "No access";
+    const labels = current.map((s) => SCOPES[s].label);
+    if (labels.length <= 2) return labels.join(", ");
+    return `${labels.length} buckets`;
+  })();
+  return (
+    <button
+      type="button"
+      onClick={onEdit}
+      disabled={disabled}
+      className="inline-flex items-center gap-2 rounded-md border border-brand-charcoal/15 bg-white px-2.5 py-1 text-xs text-brand-charcoal transition-colors hover:border-brand-charcoal/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red disabled:cursor-not-allowed disabled:opacity-50"
+      title={
+        current === null
+          ? `Default buckets: ${defaultUserScopes()
+              .map((s) => SCOPES[s].label)
+              .join(", ")}`
+          : current.length === 0
+            ? "No P21 data access"
+            : current.map((s) => SCOPES[s].label).join(", ")
+      }
+    >
+      <span>{summary}</span>
+      <span aria-hidden className="text-brand-ink-soft">
+        ✎
+      </span>
+    </button>
   );
 }
