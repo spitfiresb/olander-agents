@@ -84,7 +84,7 @@ Update this file when a new class of regression bites us. Promote sections up th
 ### When you change `src/app/api/chat/route.ts`
 - [ ] `UserTextPart` still rejects non-text parts.
 - [ ] `BodySchema` still bounds messages at `.max(50)`.
-- [ ] `stepCountIs(8)` is still the stop condition (or higher — never unbounded).
+- [ ] `stepCountIs(10)` is the stop condition (or higher — never unbounded). Was tightened to 4 at one point and the chatbot started returning empty responses on chains like `describeView → viewsQuery (retry) → viewsQuery (retry) → viewsQuery (success)` because the loop terminated before the model got a synthesis step. With `describeView` in the loop, leave plenty of headroom.
 - [ ] `auth()` gate is still in place; the only bypass is the dev `ALLOW_UNAUTHED_DEV` flag.
 - [ ] Errors return JSON, not throw — frontend expects shaped error responses.
 

@@ -323,12 +323,13 @@ export async function POST(req: Request) {
     tools: buildTools(scopes),
     temperature: MODEL_TEMPERATURE,
     maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS,
-    // Bumped from 4 → 6 (2026-05-16). Fastener lookups frequently need an
-    // initial broad search, a follow-up narrow on inv_mast, and an inv_loc
-    // join for stock — three steps just for the happy path, leaving no room
-    // for retries. Each extra step is more cost/latency; revisit if usage
-    // logs show conversations consistently hitting the cap.
-    stopWhen: stepCountIs(6),
+    // 10 steps = enough headroom for: describeView → multi-step viewsQuery
+    // chain (e.g. resolve location IDs, then transfers between them) → one or
+    // two retries on filter syntax → final synthesis. Originally 8 (per
+    // TESTING.md), tightened to 4 at some point — but with describeView in
+    // the loop the model legitimately needs more steps before answering, and
+    // hitting the cap means no final assistant text gets emitted.
+    stopWhen: stepCountIs(10),
     abortSignal: req.signal,
     onError: ({ error }) => {
       console.error("[chat] stream error:", mapToFriendlyCode(error), error);
