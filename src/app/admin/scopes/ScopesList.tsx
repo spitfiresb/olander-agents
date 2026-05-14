@@ -169,7 +169,7 @@ export function ScopesList({
           onClick={() => setResetOpen(true)}
           className="inline-flex items-center rounded-full border border-brand-charcoal/15 bg-white px-3 py-1 text-xs font-medium text-brand-ink-soft shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-red/40 hover:bg-brand-red/5 hover:text-brand-red hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-1"
         >
-          Reset to defaults…
+          Reset to defaults
         </button>
       </div>
 
@@ -268,35 +268,46 @@ function BucketSection({
           {scope.defaultForUser ? "default" : "opt-in"}
         </span>
       </button>
-      {expanded ? (
-        <ul className="border-t border-brand-charcoal/5 bg-brand-canvas/20">
-          {views.length === 0 ? (
-            <li className="px-4 py-3 text-xs italic text-brand-ink-soft">
-              No views in this bucket.
-            </li>
-          ) : (
-            views.map((v) => (
-              <li
-                key={v}
-                className="flex items-center justify-between gap-2 border-b border-brand-charcoal/5 px-4 py-1.5 last:border-b-0"
-              >
-                <code
-                  className="truncate font-mono text-xs text-brand-charcoal"
-                  title={viewTooltip(v, viewMeta[v])}
-                >
-                  {v}
-                </code>
-                <MovePopover
-                  currentLabel="Move"
-                  currentKey={scope.key}
-                  scopes={allScopes}
-                  onPick={(to) => onMove(v, to)}
-                />
+      {/* Animated expand/collapse via the grid-rows trick: parent transitions
+          grid-template-rows between 0fr and 1fr, child is overflow-hidden so
+          the visible height slides smoothly. The body is always mounted so
+          the animation has something to interpolate to/from. */}
+      <div
+        className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+          expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        }`}
+        aria-hidden={!expanded}
+      >
+        <div className="overflow-hidden">
+          <ul className="border-t border-brand-charcoal/5 bg-brand-canvas/20">
+            {views.length === 0 ? (
+              <li className="px-4 py-3 text-xs italic text-brand-ink-soft">
+                No views in this bucket.
               </li>
-            ))
-          )}
-        </ul>
-      ) : null}
+            ) : (
+              views.map((v) => (
+                <li
+                  key={v}
+                  className="flex items-center justify-between gap-2 border-b border-brand-charcoal/5 px-4 py-1.5 last:border-b-0"
+                >
+                  <code
+                    className="truncate font-mono text-xs text-brand-charcoal"
+                    title={viewTooltip(v, viewMeta[v])}
+                  >
+                    {v}
+                  </code>
+                  <MovePopover
+                    currentLabel="Move"
+                    currentKey={scope.key}
+                    scopes={allScopes}
+                    onPick={(to) => onMove(v, to)}
+                  />
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+      </div>
     </section>
   );
 }
@@ -361,58 +372,65 @@ function MovePopover({
         <span>{currentLabel}</span>
         <Caret />
       </button>
-      {open ? (
-        <div
-          role="menu"
-          className="absolute right-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg border border-brand-charcoal/15 bg-white py-1 text-xs shadow-lg"
-        >
-          <div className="max-h-72 overflow-y-auto">
-            {scopes.map((s) => {
-              const isCurrent = currentKey === s.key;
-              return (
-                <button
-                  key={s.key}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setOpen(false);
-                    if (!isCurrent) onPick(s.key);
-                  }}
-                  disabled={isCurrent}
-                  className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-brand-charcoal hover:bg-brand-sand/40 disabled:cursor-default disabled:bg-brand-canvas/40 disabled:text-brand-ink-soft"
-                >
-                  <span className="truncate">{s.label}</span>
-                  {isCurrent ? (
-                    <span className="text-[10px] uppercase tracking-wide text-brand-ink-soft">
-                      current
-                    </span>
-                  ) : !s.defaultForUser ? (
-                    <span className="text-[10px] uppercase tracking-wide text-amber-700">
-                      opt-in
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-          {!hideUnassign ? (
-            <>
-              <div className="border-t border-brand-charcoal/5" />
+      {/* Always rendered, animated in/out via opacity + scale + origin-top-right
+          so the menu blooms from the trigger pill below it. `inert` when
+          closed keeps the items out of the keyboard tab order. */}
+      <div
+        role="menu"
+        inert={!open}
+        aria-hidden={!open}
+        className={`absolute right-0 top-full z-20 mt-1 w-56 origin-top-right overflow-hidden rounded-lg border border-brand-charcoal/15 bg-white py-1 text-xs shadow-lg transition-all duration-150 ease-out ${
+          open
+            ? "pointer-events-auto scale-100 opacity-100"
+            : "pointer-events-none scale-95 opacity-0"
+        }`}
+      >
+        <div className="max-h-72 overflow-y-auto">
+          {scopes.map((s) => {
+            const isCurrent = currentKey === s.key;
+            return (
               <button
+                key={s.key}
                 type="button"
                 role="menuitem"
                 onClick={() => {
                   setOpen(false);
-                  onPick(UNASSIGNED);
+                  if (!isCurrent) onPick(s.key);
                 }}
-                className="block w-full px-3 py-1.5 text-left text-amber-800 hover:bg-amber-50"
+                disabled={isCurrent}
+                className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-brand-charcoal transition-colors duration-150 hover:bg-brand-sand/40 disabled:cursor-default disabled:bg-brand-canvas/40 disabled:text-brand-ink-soft"
               >
-                Unassign
+                <span className="truncate">{s.label}</span>
+                {isCurrent ? (
+                  <span className="text-[10px] uppercase tracking-wide text-brand-ink-soft">
+                    current
+                  </span>
+                ) : !s.defaultForUser ? (
+                  <span className="text-[10px] uppercase tracking-wide text-amber-700">
+                    opt-in
+                  </span>
+                ) : null}
               </button>
-            </>
-          ) : null}
+            );
+          })}
         </div>
-      ) : null}
+        {!hideUnassign ? (
+          <>
+            <div className="border-t border-brand-charcoal/5" />
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onPick(UNASSIGNED);
+              }}
+              className="block w-full px-3 py-1.5 text-left text-amber-800 transition-colors duration-150 hover:bg-amber-50"
+            >
+              Unassign
+            </button>
+          </>
+        ) : null}
+      </div>
     </div>
   );
 }
