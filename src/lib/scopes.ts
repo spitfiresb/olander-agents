@@ -142,17 +142,26 @@ const VIEW_RULES: ViewRule[] = [
   { match: /^p21_view_document_/i, scope: "inventory" },
   { match: /^p21_view_prod_order/i, scope: "inventory" },
   { match: /^p21_view_service_inv_mast/i, scope: "inventory" },
-  { match: /^p21_view_workbench/i, scope: "inventory" },
+  // Workbench is a generic UI word; pin to the one current view so a future
+  // `p21_view_workbench_*` that turns out to be sensitive (e.g. credit-hold
+  // queues) is uncategorized → denied for non-admins until explicitly mapped.
+  { match: /^p21_view_workbench_find_priority_pick_users$/i, scope: "inventory" },
 
   // Reference dimensions (branches, companies, languages, freight codes,
   // class/product-group lookups). Low-sensitivity static tables; folded into
   // inventory so the existing admin UI doesn't need a new scope for ~8 views
   // nobody is asking to gate separately.
-  { match: /^p21_view_branch/i, scope: "inventory" },
-  { match: /^p21_view_company/i, scope: "inventory" },
+  //
+  // The four rules with `$` anchors below are pinned to the exact current
+  // view names because their bare English prefixes (`class`, `company`,
+  // `branch`) could absorb sensitive future views like
+  // `p21_view_class_credit_terms` or `p21_view_branch_ar_balance`. Future
+  // compounds must be explicitly categorized — deny-by-default protects us.
+  { match: /^p21_view_branch$/i, scope: "inventory" },
+  { match: /^p21_view_company$/i, scope: "inventory" },
+  { match: /^p21_view_class$/i, scope: "inventory" },
   { match: /^p21_view_language/i, scope: "inventory" },
   { match: /^p21_view_location/i, scope: "inventory" },
-  { match: /^p21_view_class/i, scope: "inventory" },
   { match: /^p21_view_product_group/i, scope: "inventory" },
   { match: /^p21_view_restricted_class/i, scope: "inventory" },
   { match: /^p21_view_freight_code/i, scope: "inventory" },

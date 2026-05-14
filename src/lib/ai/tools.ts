@@ -397,8 +397,3 @@ export function buildTools(scopes: EffectiveScopes) {
     searchCatalog: makeSearchCatalog(scopes),
   } as const;
 }
-
-// Back-compat export: an unrestricted tool set, for tests + any caller that
-// only needs the input schemas (not execute). Production paths must use
-// buildTools(scopes) so the scope check fires.
-export const tools = buildTools("all");

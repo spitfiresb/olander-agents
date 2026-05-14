@@ -84,6 +84,26 @@ describe("scopeForView", () => {
     expect(scopeForView("p21_view_shipment")).toBe("inventory");
   });
 
+  it("risky bare-English prefixes are pinned to current views; future compounds deny-by-default", () => {
+    // The four prefixes below could mean inventory OR financials OR HR in a
+    // future P21 schema (e.g. p21_view_class_credit_terms,
+    // p21_view_company_payroll_summary, p21_view_branch_ar_balance, a
+    // workbench credit-hold queue). Pin them to the exact current view names
+    // so a re-run of dump-p21-schema.sh that surfaces a new compound will
+    // hit the uncategorized → denied path until an admin explicitly maps it.
+    expect(scopeForView("p21_view_class")).toBe("inventory");
+    expect(scopeForView("p21_view_company")).toBe("inventory");
+    expect(scopeForView("p21_view_branch")).toBe("inventory");
+    expect(scopeForView("p21_view_workbench_find_priority_pick_users")).toBe(
+      "inventory",
+    );
+
+    expect(scopeForView("p21_view_class_credit_terms")).toBeNull();
+    expect(scopeForView("p21_view_company_payroll_summary")).toBeNull();
+    expect(scopeForView("p21_view_branch_ar_balance")).toBeNull();
+    expect(scopeForView("p21_view_workbench_credit_holds")).toBeNull();
+  });
+
   it("buckets vendors and AP invoice headers as vendors", () => {
     expect(scopeForView("p21_view_vendor")).toBe("vendors");
     expect(scopeForView("p21_view_supplier")).toBe("vendors");
