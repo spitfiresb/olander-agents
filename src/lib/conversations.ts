@@ -231,6 +231,12 @@ export async function softDeleteConversation(
 }
 
 export type PersistedMessage = {
+  // When the caller (chat route) has a stable id for this message — typically
+  // the AI SDK's client-generated id — passing it through here keeps the DB
+  // row's id aligned with what the client tracks, so edit-and-resend's
+  // editedMessageId lookup works on freshly-sent turns. Omit to let drizzle's
+  // $defaultFn assign a UUID.
+  id?: string;
   role: "user" | "assistant" | "system";
   parts: unknown;
   model?: string | null;
@@ -259,6 +265,10 @@ export async function appendMessages(
     .insert(messages)
     .values(
       newMessages.map((m) => ({
+        // Spread id only when the caller provided one; otherwise drizzle's
+        // schema-level $defaultFn(crypto.randomUUID) supplies a UUID. Mixing
+        // formats in one column is fine — text column accepts any string.
+        ...(m.id ? { id: m.id } : {}),
         conversationId,
         role: m.role,
         parts: m.parts as object,

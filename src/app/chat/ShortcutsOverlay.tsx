@@ -56,7 +56,12 @@ export function ShortcutsOverlay({ open, onClose }: Props) {
       className={`fixed inset-0 z-40 flex items-center justify-center px-4 ${
         open ? "pointer-events-auto" : "pointer-events-none"
       }`}
-      aria-hidden={!open}
+      // `inert` is the modern replacement for aria-hidden on a closed dialog
+      // container — removes descendants from the focus order entirely, so the
+      // close button can't retain focus while its ancestor claims to be
+      // hidden (which the browser correctly warns about with aria-hidden).
+      // Spec: https://html.spec.whatwg.org/multipage/interaction.html#inert
+      inert={!open}
     >
       {/* Backdrop */}
       <button

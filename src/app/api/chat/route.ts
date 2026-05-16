@@ -83,7 +83,12 @@ const BodySchema = z.object({
   // before the new user turn is appended (see `supersedeMessagesFrom`).
   // Ownership is verified inside the helper — a forged id on someone else's
   // conversation is a no-op, not a leak.
-  editedMessageId: z.string().uuid().optional(),
+  //
+  // Format: any reasonable string, not strictly UUID. The AI SDK generates
+  // ~16-char base64-ish ids client-side; old DB rows use UUIDs from drizzle's
+  // $defaultFn. The persistence path (appendMessages) preserves the client
+  // id when provided so the lookup matches on either format.
+  editedMessageId: z.string().min(1).max(128).optional(),
   messages: z
     .array(z.discriminatedUnion("role", [UserMessage, AssistantMessage]))
     .min(1)
@@ -262,9 +267,14 @@ export async function POST(req: Request) {
         }
       }
       // Persist the just-sent user message immediately so a stream that fails
-      // mid-flight still has the question recorded.
+      // mid-flight still has the question recorded. We forward the client's
+      // message id so subsequent edit-and-resend requests can reference the
+      // row by the id the client already knows — otherwise the client's
+      // in-memory id (from the AI SDK) and the DB id (drizzle UUID) would
+      // disagree and supersedeMessagesFrom would no-op.
       await appendMessages(userId, activeConversationId, [
         {
+          id: lastUserMessage.id,
           role: "user",
           parts: lastUserMessage.parts,
           model: null,

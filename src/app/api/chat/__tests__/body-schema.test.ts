@@ -45,7 +45,9 @@ const AssistantMessage = z.object({
 
 const BodySchema = z.object({
   conversationId: z.string().uuid().optional(),
-  editedMessageId: z.string().uuid().optional(),
+  // Mirror of route.ts — any short non-empty string, not strictly UUID, so
+  // the SDK's base64-ish client ids pass the same as drizzle's DB UUIDs.
+  editedMessageId: z.string().min(1).max(128).optional(),
   messages: z
     .array(z.discriminatedUnion("role", [UserMessage, AssistantMessage]))
     .min(1)
@@ -169,7 +171,7 @@ describe("/api/chat BodySchema", () => {
     expect(BodySchema.safeParse({ messages: [] }).success).toBe(false);
   });
 
-  test("accepts editedMessageId only if it's a UUID", () => {
+  test("accepts editedMessageId as any short non-empty string", () => {
     const baseMessages = [
       {
         id: "m1",
@@ -177,18 +179,36 @@ describe("/api/chat BodySchema", () => {
         parts: [{ type: "text" as const, text: "edited body" }],
       },
     ];
+    // Accept both formats the system actually emits:
+    //  - SDK-generated client ids (~16-char base64-ish) on freshly-sent turns
+    //  - drizzle $defaultFn UUIDs for older DB-loaded turns
     expect(
       BodySchema.safeParse({
-        editedMessageId: "not-a-uuid",
+        editedMessageId: "OZAjwQRiQE2DVAaO",
         messages: baseMessages,
       }).success,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       BodySchema.safeParse({
         editedMessageId: "22222222-2222-4222-8222-222222222222",
         messages: baseMessages,
       }).success,
     ).toBe(true);
+    // Reject empty strings (treats "" as "no edit," but the field is
+    // optional, so callers should just omit instead).
+    expect(
+      BodySchema.safeParse({
+        editedMessageId: "",
+        messages: baseMessages,
+      }).success,
+    ).toBe(false);
+    // Cap at 128 chars to keep the lookup column reasonable.
+    expect(
+      BodySchema.safeParse({
+        editedMessageId: "x".repeat(129),
+        messages: baseMessages,
+      }).success,
+    ).toBe(false);
     // Optional — omitting it is fine on a normal (non-edit) request.
     expect(
       BodySchema.safeParse({ messages: baseMessages }).success,
