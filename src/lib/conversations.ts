@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { conversations, messages, toolCalls } from "@/db/schema";
 
@@ -68,7 +68,13 @@ export async function searchConversations(userId: string, query: string) {
         isNull(conversations.deletedAt),
         or(
           ilike(conversations.title, titlePattern),
-          sql`${messages}."searchVector" @@ plainto_tsquery('english', ${trimmed})`,
+          // Match a message body only when the message is still live —
+          // superseded turns shouldn't surface a conversation, otherwise the
+          // rep clicks a result and the matching content isn't visible.
+          and(
+            sql`${messages}."searchVector" @@ plainto_tsquery('english', ${trimmed})`,
+            isNull(messages.supersededAt),
+          ),
         ),
       ),
     )
@@ -133,9 +139,57 @@ export async function loadMessages(userId: string, conversationId: string) {
   const rows = await db
     .select()
     .from(messages)
-    .where(eq(messages.conversationId, conversationId))
+    .where(
+      and(
+        eq(messages.conversationId, conversationId),
+        // Edit-and-resend: superseded rows stay in the DB for audit but
+        // disappear from user-facing replay. Admin queries can drop this
+        // filter to see the full history.
+        isNull(messages.supersededAt),
+      ),
+    )
     .orderBy(messages.createdAt);
   return rows;
+}
+
+// Edit-and-resend tombstone. Sets supersededAt = now() on every message in
+// `conversationId` whose createdAt is >= the target message's createdAt.
+// Ownership-gated by getConversation; bails silently if the target isn't on
+// this conversation (forged id or stale client cache pointing at a deleted
+// chat). Already-superseded rows are skipped so their original timestamp is
+// preserved for forensics. Returns the count of newly-superseded rows.
+export async function supersedeMessagesFrom(
+  userId: string,
+  conversationId: string,
+  fromMessageId: string,
+): Promise<number> {
+  const conv = await getConversation(userId, conversationId);
+  if (!conv) return 0;
+
+  const [target] = await db
+    .select({ createdAt: messages.createdAt })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.id, fromMessageId),
+        eq(messages.conversationId, conversationId),
+      ),
+    )
+    .limit(1);
+  if (!target) return 0;
+
+  const result = await db
+    .update(messages)
+    .set({ supersededAt: new Date() })
+    .where(
+      and(
+        eq(messages.conversationId, conversationId),
+        gte(messages.createdAt, target.createdAt),
+        isNull(messages.supersededAt),
+      ),
+    )
+    .returning({ id: messages.id });
+  return result.length;
 }
 
 export async function renameConversation(
@@ -294,7 +348,14 @@ export async function exportConversationMarkdown(
   const rows = await db
     .select()
     .from(messages)
-    .where(eq(messages.conversationId, conversationId))
+    .where(
+      and(
+        eq(messages.conversationId, conversationId),
+        // Match what the rep sees on reload — exclude superseded edit-and-
+        // resend rows. Admin audit reads should drop this filter.
+        isNull(messages.supersededAt),
+      ),
+    )
     .orderBy(messages.createdAt);
 
   const lines: string[] = [];

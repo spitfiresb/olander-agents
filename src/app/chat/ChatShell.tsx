@@ -51,6 +51,11 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
   // outside the React render path) can read the current id without a
   // re-render. Mirrored into state for the sidebar's "active" highlight.
   const conversationIdRef = useRef<string | null>(initialConversationId ?? null);
+  // One-shot: holds the id of the user message currently being edit-and-
+  // resent, read+cleared inside the transport body callback. Lives outside
+  // React state because the transport callback fires outside the render
+  // path, same reason as conversationIdRef.
+  const editedMessageIdRef = useRef<string | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(
     initialConversationId ?? null,
   );
@@ -83,7 +88,16 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
     () =>
       new DefaultChatTransport({
         api: "/api/chat",
-        body: () => ({ conversationId: conversationIdRef.current ?? undefined }),
+        body: () => {
+          // One-shot read: clear immediately so the next normal send doesn't
+          // carry a stale editedMessageId and accidentally re-supersede.
+          const editedMessageId = editedMessageIdRef.current ?? undefined;
+          editedMessageIdRef.current = null;
+          return {
+            conversationId: conversationIdRef.current ?? undefined,
+            editedMessageId,
+          };
+        },
       }),
   );
   /* eslint-enable react-hooks/refs */
@@ -343,6 +357,22 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
     } as unknown as Parameters<typeof sendMessage>[0]);
   }
 
+  // Edit-and-resend handler. Truncates in-memory history to just before the
+  // edited message, sets the one-shot ref so the next request body includes
+  // editedMessageId, then sends the new turn. The server marks every row
+  // from the edited message forward as supersededAt = now() before appending
+  // the new user turn — the dropped turns stay in the DB for audit but
+  // disappear from user-facing reads on reload.
+  function onEditAndResend(messageId: string, newText: string) {
+    const idx = messages.findIndex((m) => m.id === messageId);
+    if (idx === -1) return;
+    setMessages((prev) => prev.slice(0, idx));
+    editedMessageIdRef.current = messageId;
+    sendMessage({
+      parts: [{ type: "text", text: newText }],
+    } as unknown as Parameters<typeof sendMessage>[0]);
+  }
+
   function hasFilesPayload(e: ReactDragEvent): boolean {
     // Some browsers report "Files" in dataTransfer.types only mid-drag; the
     // fallback to .items keeps Firefox happy on dragenter.
@@ -581,6 +611,7 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
             onRegenerate={() => regenerate()}
             onSelectSuggestion={setInput}
             onSelectFollowUp={selectFollowUp}
+            onEditAndResend={onEditAndResend}
           />
           <Composer
             input={input}

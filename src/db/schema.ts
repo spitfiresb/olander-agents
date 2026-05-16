@@ -101,6 +101,12 @@ export const conversations = pgTable(
 // the migration SQL as a STORED generated column over `searchText` plus a
 // GIN index — it's queried via raw `sql` template literals from
 // lib/conversations because drizzle doesn't model tsvector natively.
+//
+// `supersededAt` is the edit-and-resend tombstone: when a user edits an
+// earlier message, every row at or after that message's createdAt is
+// stamped with supersededAt = now() and disappears from user-facing reads
+// (loadMessages, exportConversationMarkdown). Admin queries / audit logs
+// see everything. Nullable; reads filter with `IS NULL`.
 export const messages = pgTable(
   "message",
   {
@@ -118,8 +124,12 @@ export const messages = pgTable(
     createdAt: timestamp("createdAt", { mode: "date", withTimezone: true })
       .notNull()
       .defaultNow(),
+    supersededAt: timestamp("supersededAt", { mode: "date", withTimezone: true }),
   },
-  (t) => [index("msg_conv_created_idx").on(t.conversationId, t.createdAt)],
+  (t) => [
+    index("msg_conv_created_idx").on(t.conversationId, t.createdAt),
+    index("msg_conv_superseded_idx").on(t.conversationId, t.supersededAt),
+  ],
 );
 
 // Flattened audit log of tool calls — denormalized from messages.parts so

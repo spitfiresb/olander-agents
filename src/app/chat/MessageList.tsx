@@ -5,26 +5,9 @@ import type { ChatStatus, UIMessage } from "ai";
 import { AssistantContent } from "@/components/chat/AssistantContent";
 import { isToolPart, ToolCallCard, type ToolPartLike } from "@/components/chat/ToolCallCard";
 import { summarizeToolUsageForCitation } from "@/lib/ai/tool-labels";
-import { AttachmentChip } from "./AttachmentChip";
+import { EditableUserBubble } from "./EditableUserBubble";
 import { EmptyState } from "./EmptyState";
 import { FollowUpChips } from "./FollowUpChips";
-
-type FilePart = {
-  type: "file";
-  mediaType: string;
-  url: string;
-  filename: string;
-  size?: number;
-};
-
-const isFilePart = (p: unknown): p is FilePart =>
-  typeof p === "object" &&
-  p !== null &&
-  "type" in p &&
-  (p as { type: string }).type === "file" &&
-  "url" in p &&
-  "mediaType" in p &&
-  "filename" in p;
 
 const STUCK_THRESHOLD_PX = 80;
 
@@ -34,6 +17,7 @@ type Props = {
   onRegenerate: () => void;
   onSelectSuggestion: (text: string) => void;
   onSelectFollowUp: (prompt: string) => void;
+  onEditAndResend: (messageId: string, newText: string) => void;
 };
 
 export function MessageList({
@@ -42,6 +26,7 @@ export function MessageList({
   onRegenerate,
   onSelectSuggestion,
   onSelectFollowUp,
+  onEditAndResend,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [stuckToBottom, setStuckToBottom] = useState(true);
@@ -88,6 +73,16 @@ export function MessageList({
             <EmptyState onSelectSuggestion={onSelectSuggestion} />
           ) : (
             messages.map((m, i) => {
+              if (m.role === "user") {
+                return (
+                  <EditableUserBubble
+                    key={m.id}
+                    message={m}
+                    canEdit={status === "ready"}
+                    onEditAndResend={onEditAndResend}
+                  />
+                );
+              }
               const isLast = i === lastAssistantIndex;
               return (
                 <Bubble
@@ -125,6 +120,9 @@ export function MessageList({
   );
 }
 
+// Renders an assistant message — text + tool calls grouped into the steps
+// disclosure plus the final answer. User bubbles go through EditableUserBubble
+// at the messages.map level; this component only handles assistant rendering.
 function Bubble({
   message,
   showActions,
@@ -138,46 +136,10 @@ function Bubble({
   onRegenerate: () => void;
   onSelectFollowUp: (prompt: string) => void;
 }) {
-  const isUser = message.role === "user";
-
   type TextPart = { type: "text"; text: string };
   const isTextPart = (p: unknown): p is TextPart =>
     typeof p === "object" && p !== null && "type" in p &&
     (p as { type: string }).type === "text";
-
-  if (isUser) {
-    const userText = message.parts
-      .filter(isTextPart)
-      .map((p) => p.text)
-      .join("\n\n");
-    const userFiles = message.parts.filter(isFilePart);
-    return (
-      <div className="flex justify-end animate-message-in">
-        <div className="flex max-w-[80%] flex-col items-end gap-2">
-          {userFiles.length > 0 && (
-            <div className="flex flex-wrap justify-end gap-2">
-              {userFiles.map((f, i) => (
-                <AttachmentChip
-                  key={`${f.url}-${i}`}
-                  filename={f.filename}
-                  mediaType={f.mediaType}
-                  size={f.size}
-                  url={f.url}
-                  variant="message"
-                  status="ready"
-                />
-              ))}
-            </div>
-          )}
-          {userText && (
-            <div className="whitespace-pre-wrap rounded-2xl bg-brand-sand px-4 py-2.5 leading-relaxed text-brand-charcoal">
-              {userText}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
 
   // Walk parts in order, grouping consecutive text into one bubble so the
   // UI mirrors how the assistant actually thought: text → tool → text → tool.

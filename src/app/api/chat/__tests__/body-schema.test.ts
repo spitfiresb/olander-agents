@@ -45,6 +45,7 @@ const AssistantMessage = z.object({
 
 const BodySchema = z.object({
   conversationId: z.string().uuid().optional(),
+  editedMessageId: z.string().uuid().optional(),
   messages: z
     .array(z.discriminatedUnion("role", [UserMessage, AssistantMessage]))
     .min(1)
@@ -166,6 +167,32 @@ describe("/api/chat BodySchema", () => {
 
   test("requires at least one message", () => {
     expect(BodySchema.safeParse({ messages: [] }).success).toBe(false);
+  });
+
+  test("accepts editedMessageId only if it's a UUID", () => {
+    const baseMessages = [
+      {
+        id: "m1",
+        role: "user" as const,
+        parts: [{ type: "text" as const, text: "edited body" }],
+      },
+    ];
+    expect(
+      BodySchema.safeParse({
+        editedMessageId: "not-a-uuid",
+        messages: baseMessages,
+      }).success,
+    ).toBe(false);
+    expect(
+      BodySchema.safeParse({
+        editedMessageId: "22222222-2222-4222-8222-222222222222",
+        messages: baseMessages,
+      }).success,
+    ).toBe(true);
+    // Optional — omitting it is fine on a normal (non-edit) request.
+    expect(
+      BodySchema.safeParse({ messages: baseMessages }).success,
+    ).toBe(true);
   });
 
   test("accepts conversationId only if it's a UUID", () => {

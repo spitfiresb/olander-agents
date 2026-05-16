@@ -16,6 +16,7 @@ import {
   appendMessages,
   createConversation,
   getConversation,
+  supersedeMessagesFrom,
 } from "@/lib/conversations";
 
 export const maxDuration = 60;
@@ -77,6 +78,12 @@ const AssistantMessage = z.object({
 
 const BodySchema = z.object({
   conversationId: z.string().uuid().optional(),
+  // Edit-and-resend hook. When set, every message in the conversation with
+  // createdAt >= this message's createdAt is stamped supersededAt = now()
+  // before the new user turn is appended (see `supersedeMessagesFrom`).
+  // Ownership is verified inside the helper — a forged id on someone else's
+  // conversation is a no-op, not a leak.
+  editedMessageId: z.string().uuid().optional(),
   messages: z
     .array(z.discriminatedUnion("role", [UserMessage, AssistantMessage]))
     .min(1)
@@ -234,6 +241,25 @@ export async function POST(req: Request) {
         })();
         const conv = await createConversation(userId, firstText);
         activeConversationId = conv.id;
+      }
+      // Edit-and-resend: stamp every message from the edited turn forward
+      // with supersededAt = now() so they vanish from user-facing reads on
+      // reload. Order matters — must run before the new user turn lands,
+      // otherwise the fresh insert gets caught in the same sweep. Gate on
+      // both ids: an edit referring to a not-yet-created conversation is
+      // nonsense, so we ignore editedMessageId in that case. Failures here
+      // produce a duplicate-history UX bug on reload but don't block the
+      // chat — surface in logs and continue.
+      if (parsed.data.editedMessageId && parsed.data.conversationId) {
+        try {
+          await supersedeMessagesFrom(
+            userId,
+            activeConversationId,
+            parsed.data.editedMessageId,
+          );
+        } catch (err) {
+          console.error("[chat] supersede failed:", err);
+        }
       }
       // Persist the just-sent user message immediately so a stream that fails
       // mid-flight still has the question recorded.
