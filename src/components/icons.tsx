@@ -139,6 +139,31 @@ export function PaperclipIcon({ className }: { className?: string } = {}) {
   );
 }
 
+// Microphone — capsule head, holder arc, stand, and base bar. Stroke-based
+// to match the rest of the composer icon row. The composer's listening state
+// swaps the button background (not the glyph) so the symbol stays stable.
+export function MicIcon({ className }: { className?: string } = {}) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <rect x="6" y="2" width="4" height="8" rx="2" />
+      <path d="M3.5 8a4.5 4.5 0 0 0 9 0" />
+      <path d="M8 12.5v2" />
+      <path d="M5.5 14.5h5" />
+    </svg>
+  );
+}
+
 export function CameraIcon({ className }: { className?: string } = {}) {
   return (
     <svg

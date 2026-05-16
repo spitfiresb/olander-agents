@@ -3,12 +3,15 @@
 import {
   type ChangeEvent,
   type ClipboardEvent,
+  type Dispatch,
   type FormEvent,
   type KeyboardEvent,
+  type SetStateAction,
   useRef,
 } from "react";
 import type { ChatStatus } from "ai";
-import { CameraIcon, PaperclipIcon } from "@/components/icons";
+import { CameraIcon, MicIcon, PaperclipIcon } from "@/components/icons";
+import { useSpeechRecognition } from "@/lib/voice/useSpeechRecognition";
 import { AttachmentChip } from "./AttachmentChip";
 
 // Client-side state for a single attachment chip. Lives in ChatShell because
@@ -44,7 +47,9 @@ const ACCEPT_MIME = [
 
 type Props = {
   input: string;
-  setInput: (value: string) => void;
+  // Accept the functional-updater form so the speech hook can append to the
+  // latest input without racing the React render cycle.
+  setInput: Dispatch<SetStateAction<string>>;
   status: ChatStatus;
   error: Error | undefined;
   attachments: ComposerAttachment[];
@@ -87,6 +92,18 @@ export function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
+  // Voice input — single-utterance Web Speech. Final transcripts append to
+  // input via the functional updater so a mid-listen edit by the user isn't
+  // clobbered. The hook self-detects support and exposes `supported=false`
+  // on Firefox / unsupported browsers, which hides the button entirely.
+  const speech = useSpeechRecognition({
+    onFinalTranscript: (text) => {
+      setInput((prev) =>
+        prev.length > 0 && !/\s$/.test(prev) ? `${prev} ${text}` : `${prev}${text}`,
+      );
+    },
+  });
+
   const trimmed = input.trim();
   const readyCount = attachments.filter((a) => a.status === "ready").length;
   const stillUploading = attachments.some((a) => a.status === "uploading");
@@ -98,7 +115,17 @@ export function Composer({
 
   const submit = () => {
     if (!canSend) return;
+    // Finalize any in-flight transcript before submit; onresult fires before
+    // onend, so a pending phrase still lands in `input` and the message will
+    // include it on the next render. If it doesn't land in time, the user
+    // sees a trailing fragment in the empty composer — acceptable.
+    if (speech.listening) speech.stop();
     onSubmit();
+  };
+
+  const toggleMic = () => {
+    if (speech.listening) speech.stop();
+    else speech.start();
   };
 
   const handleSubmit = (e: FormEvent) => {
@@ -146,6 +173,13 @@ export function Composer({
             </button>
           </div>
         )}
+        {speech.error && (
+          <div className="mb-2 rounded-lg border border-brand-charcoal/15 bg-white px-4 py-2 text-xs text-brand-ink-soft">
+            {speech.error === "mic_blocked"
+              ? "Microphone access blocked — check your browser permissions."
+              : "Voice input failed. Please try again."}
+          </div>
+        )}
         <form
           onSubmit={handleSubmit}
           className="flex flex-col gap-2 rounded-2xl border border-brand-charcoal/15 bg-white p-2 shadow-[0_-4px_16px_-12px_rgba(45,46,41,0.15)] transition-colors focus-within:border-brand-red/40 focus-within:ring-1 focus-within:ring-brand-red/20"
@@ -176,6 +210,21 @@ export function Composer({
             >
               <PaperclipIcon />
             </button>
+            {speech.supported && (
+              <button
+                type="button"
+                onClick={toggleMic}
+                aria-label={speech.listening ? "Stop voice input" : "Start voice input"}
+                aria-pressed={speech.listening}
+                className={
+                  speech.listening
+                    ? "flex h-10 w-10 shrink-0 animate-pulse items-center justify-center rounded-full bg-brand-red/10 text-brand-red transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2"
+                    : "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-brand-ink-soft transition-colors hover:bg-brand-sand/40 hover:text-brand-charcoal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2"
+                }
+              >
+                <MicIcon />
+              </button>
+            )}
             <button
               type="button"
               onClick={() => cameraInputRef.current?.click()}
