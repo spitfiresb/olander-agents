@@ -7,6 +7,7 @@ import { isToolPart, ToolCallCard, type ToolPartLike } from "@/components/chat/T
 import { summarizeToolUsageForCitation } from "@/lib/ai/tool-labels";
 import { AttachmentChip } from "./AttachmentChip";
 import { EmptyState } from "./EmptyState";
+import { FollowUpChips } from "./FollowUpChips";
 
 type FilePart = {
   type: "file";
@@ -32,9 +33,16 @@ type Props = {
   status: ChatStatus;
   onRegenerate: () => void;
   onSelectSuggestion: (text: string) => void;
+  onSelectFollowUp: (prompt: string) => void;
 };
 
-export function MessageList({ messages, status, onRegenerate, onSelectSuggestion }: Props) {
+export function MessageList({
+  messages,
+  status,
+  onRegenerate,
+  onSelectSuggestion,
+  onSelectFollowUp,
+}: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [stuckToBottom, setStuckToBottom] = useState(true);
 
@@ -88,6 +96,7 @@ export function MessageList({ messages, status, onRegenerate, onSelectSuggestion
                   showActions={isLast && status === "ready"}
                   inFlight={isLast && status !== "ready"}
                   onRegenerate={onRegenerate}
+                  onSelectFollowUp={onSelectFollowUp}
                 />
               );
             })
@@ -121,11 +130,13 @@ function Bubble({
   showActions,
   inFlight,
   onRegenerate,
+  onSelectFollowUp,
 }: {
   message: UIMessage;
   showActions: boolean;
   inFlight: boolean;
   onRegenerate: () => void;
+  onSelectFollowUp: (prompt: string) => void;
 }) {
   const isUser = message.role === "user";
 
@@ -260,6 +271,9 @@ function Bubble({
           <div className="text-[11px] text-brand-ink-soft">
             Data: {citations.join(", ")}
           </div>
+        )}
+        {showActions && hasText && (
+          <FollowUpChips onSelect={onSelectFollowUp} />
         )}
         {showActions && hasText && (
           <MessageActions text={allText} onRegenerate={onRegenerate} />

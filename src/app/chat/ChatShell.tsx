@@ -15,6 +15,7 @@ import { Wordmark } from "@/components/Wordmark";
 import { Composer, type ComposerAttachment } from "./Composer";
 import { MessageList } from "./MessageList";
 import { MobileSidebarDrawer } from "./MobileSidebarDrawer";
+import { ShortcutsOverlay } from "./ShortcutsOverlay";
 import { Sidebar, type ConversationSummary } from "./Sidebar";
 import { signOutAction } from "./actions";
 
@@ -56,6 +57,7 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [attachmentBanner, setAttachmentBanner] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -331,6 +333,16 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
     setAttachments([]);
   }
 
+  // Follow-up chip handler — fires the canned prompt as the next user turn.
+  // The conversation already exists (chips only render after an assistant
+  // reply landed), so skip the pre-create dance from submitMessage. Pure
+  // text-only message; never carries attachments.
+  function selectFollowUp(prompt: string) {
+    sendMessage({
+      parts: [{ type: "text", text: prompt }],
+    } as unknown as Parameters<typeof sendMessage>[0]);
+  }
+
   function hasFilesPayload(e: ReactDragEvent): boolean {
     // Some browsers report "Files" in dataTransfer.types only mid-drag; the
     // fallback to .items keeps Firefox happy on dragenter.
@@ -406,6 +418,25 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
         copyLatestAssistant();
         return;
       }
+      // `?` opens the shortcuts overlay — but only when the user isn't typing
+      // into a field. Listen on event.key so layouts that produce "?" with
+      // shifted keys still register. Modifiers + ? are handled by their own
+      // app shortcuts; bare `?` is ours.
+      if (e.key === "?" && !mod && !e.altKey) {
+        const target = e.target as HTMLElement | null;
+        const inField =
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLTextAreaElement ||
+          (target?.isContentEditable ?? false);
+        if (inField) return;
+        e.preventDefault();
+        setShortcutsOpen(true);
+        return;
+      }
+      // Esc defers to the overlay when it's open (the overlay has its own
+      // listener) so a single Esc closes the overlay rather than also
+      // stopping the stream underneath.
+      if (e.key === "Escape" && shortcutsOpen) return;
       if (e.key === "Escape" && (status === "streaming" || status === "submitted")) {
         e.preventDefault();
         stop();
@@ -414,7 +445,7 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, status]);
+  }, [messages, status, shortcutsOpen]);
 
   async function onDeleteConversation(id: string) {
     await fetch(`/api/conversations/${id}`, { method: "DELETE" });
@@ -475,6 +506,11 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
           onRename={onRenameConversation}
         />
       </div>
+
+      <ShortcutsOverlay
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+      />
 
       <MobileSidebarDrawer
         open={mobileDrawerOpen}
@@ -544,6 +580,7 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
             status={status}
             onRegenerate={() => regenerate()}
             onSelectSuggestion={setInput}
+            onSelectFollowUp={selectFollowUp}
           />
           <Composer
             input={input}
