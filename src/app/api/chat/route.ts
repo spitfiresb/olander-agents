@@ -279,7 +279,12 @@ export async function POST(req: Request) {
     tools,
     temperature: MODEL_TEMPERATURE,
     maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS,
-    stopWhen: stepCountIs(4),
+    // Bumped from 4 → 6 (2026-05-16). Fastener lookups frequently need an
+    // initial broad search, a follow-up narrow on inv_mast, and an inv_loc
+    // join for stock — three steps just for the happy path, leaving no room
+    // for retries. Each extra step is more cost/latency; revisit if usage
+    // logs show conversations consistently hitting the cap.
+    stopWhen: stepCountIs(6),
     abortSignal: req.signal,
     onError: ({ error }) => {
       console.error("[chat] stream error:", mapToFriendlyCode(error), error);
