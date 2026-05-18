@@ -113,7 +113,12 @@ export const conversations = pgTable(
     deletedAt: timestamp("deletedAt", { mode: "date", withTimezone: true }),
     pinnedAt: timestamp("pinnedAt", { mode: "date", withTimezone: true }),
   },
-  (t) => [index("conv_user_updated_idx").on(t.userId, t.updatedAt)],
+  (t) => [
+    index("conv_user_updated_idx").on(t.userId, t.updatedAt),
+    // Backs the pinned-first ordering in listConversations. The pinnedAt
+    // column is nullable; NULLs sort to the end via the ORDER BY clause.
+    index("conv_user_pinned_idx").on(t.userId, t.pinnedAt),
+  ],
 );
 
 // One row per message. `parts` carries the full UIMessage parts array
