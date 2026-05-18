@@ -15,30 +15,39 @@ Update this file when a new class of regression bites us. Promote sections up th
 
 ## 1. Auth (highest historical regression rate — 5 fix commits - can be skipped in dev, never in production builds)
 
-**Surface:** `src/auth.ts`, `src/app/auth/error/`, `src/app/api/auth/[...nextauth]/`, `src/app/SignInPanel.tsx`.
+**Surface:** `src/auth.ts`, `src/lib/auth-allowlist.ts`, `src/lib/members.ts`, `src/app/admin/members/`, `src/app/auth/error/`, `src/app/api/auth/[...nextauth]/`, `src/app/SignInPanel.tsx`.
 
-**Why it tops the list:** Auth glues Microsoft Entra ID, env vars, a domain+tenant allowlist, and the Drizzle adapter together. Every one of those joints has caused a real regression.
+**Why it tops the list:** Auth glues Microsoft Entra ID, env vars, the tenant check + the `member` allowlist, and the Drizzle adapter together. Every one of those joints has caused a real regression.
 
 ### Smoke check
 - [ ] Signed out, visit `/chat` → blocked / redirected to sign-in.
-- [ ] Sign in with an allowlisted @olander.com or @uoregon.edu account → lands on `/chat`.
-- [ ] Sign in with a non-allowed domain → lands on `/auth/error` with the branded page, not the default Auth.js page.
+- [ ] Sign in with an account that has a non-`revoked` `member` row (or is in `AUTH_BOOTSTRAP_ADMINS`) → lands on `/chat`.
+- [ ] Sign in with an account that is **not** in `member` and not a bootstrap admin → lands on `/auth/error` with the branded page, not the default Auth.js page.
 - [ ] Sign out from the account menu → signed-out surface, `/chat` is blocked again.
 - [ ] Microsoft sign-in prompts the account picker every time (not silent SSO into a random cached account).
+- [ ] As an admin, `/admin/members`: add an email → it appears; flip a `User`/`Admin` toggle → "Save changes" turns red, click it → tier persists; "Remove user" → that user's `session` rows are gone, they're bounced to `/auth/error`, and the row disappears; re-add the same email → they're back and can sign in again. `AUTH_BOOTSTRAP_ADMINS` accounts work even with an empty `member` table. (`/api/dev/sign-in` bypasses the `signIn` gate + `events.signIn` — it exercises the admin actions and session-killing, not the gate; the gate is covered by `npm test`.)
 
 ### Things that have actually broken
 - **Wrong Entra env var name** (6d6c191) — using `AUTH_MICROSOFT_ENTRA_ID_TENANT_ID` instead of `..._ISSUER`. Auth silently 500s. Verify all Entra env names match what `next-auth/providers/microsoft-entra-id` actually reads.
-- **Email-suffix-only allowlist let a foreign tenant spoof @olander.com** (12ce16f) — `profile.email` is operator-settable. Always gate on `profile.tid` first, *then* domain.
-- **`ALLOWED_TENANT_IDS` empty fails closed** (intentional, 12ce16f) — but that means an unset env var silently breaks all sign-ins. Confirm it's populated in every environment you deploy to.
+- **Email-suffix-only allowlist let a foreign tenant spoof @olander.com** (12ce16f) — `profile.email` is operator-settable. Always gate on `profile.tid` first, *then* the email check. (`evaluateTenant` now deliberately does **not** check the email domain — the `member`-table membership check is the email gate. Don't re-add a domain assertion thinking it's a regression.)
+- **`AUTH_ALLOWED_TENANT_IDS` empty fails closed** (intentional, 12ce16f) — but that means an unset env var silently breaks all sign-ins. Confirm it's populated in every environment you deploy to.
 - **Without `prompt: select_account`** (48c191f), MS silently reuses the browser's cached account and the user gets Access Denied with no way to switch.
-- **Allowlist scoping mistakes** (6558955) — broadened from named emails to a whole domain by accident. Re-read `ALLOWED_DOMAINS` after any change to the signIn callback.
+- **Domain → per-email allowlist migration** — the `0002` migration backfills `member` from existing `user` rows + seeds bootstrap admins; an empty `member` table on a fresh deploy locks everyone out except `AUTH_BOOTSTRAP_ADMINS`.
 
 ### When you change `src/auth.ts`
-- [ ] Tenant ID check still runs **before** the domain check.
-- [ ] Empty `ALLOWED_TENANT_IDS` still returns `false` (fail closed).
+- [ ] Tenant ID check (`evaluateTenant`) still runs **before** the `isAllowedMember` membership check.
+- [ ] Empty `AUTH_ALLOWED_TENANT_IDS` still makes `evaluateTenant` return `{ ok: false }` (fail closed).
+- [ ] `events.signIn` still reconciles `user.role` from `member.role` (otherwise an invited-as-admin user stays a plain user after their first login).
 - [ ] `prompt: select_account` is still in the authorization params.
 - [ ] `pages: { error: "/auth/error" }` is still wired so errors hit the branded page.
 - [ ] `session.user.role = user.role` is still set in the session callback (consumers depend on it).
+- [ ] `activeSession()` still returns `null` for `revoked`; chat pages/routes use it (not bare `auth()`).
+
+### When you change `/admin/members` or `src/lib/members.ts`
+- [ ] Actions still re-check `role === "admin"` server-side (the disabled UI controls are not the gate).
+- [ ] You still can't change your **own** tier or remove yourself, and a batch that would leave **zero** admins is rejected.
+- [ ] "Remove user" still goes through `setMemberRole(email, "revoked")` — deletes that user's `session` rows and sets `user.role = "revoked"`; the row stays but `listMembers` (which filters out `revoked`) hides it; re-adding the email restores it.
+- [ ] `npm test` covers `normalizeEmail` / `parseBootstrapAdmins` / `evaluateTenant` (the DB-touching `members.ts` isn't unit-tested by design — same reason `auth-allowlist.ts` is split out).
 
 ---
 
@@ -83,7 +92,7 @@ Update this file when a new class of regression bites us. Promote sections up th
 - [ ] Visit `/status` while signed out → page renders, shows operational/degraded/down per service, **no internal IPs or hostnames anywhere in the HTML or `/api/status` JSON**.
 - [ ] Each service shows a 90-day uptime bar that isn't entirely empty.
 - [ ] P21 service reflects the droplet's actual health (force a failure on the droplet → status page shows it within the refresh window).
-- [ ] Anthropic service falls back to `status.anthropic.com` if droplet payload lacks `anthropic` checks.
+- [ ] Anthropic service reflects the droplet's direct probe of `api.anthropic.com/v1/models` (operational when the probe gets any 2xx/3xx/4xx response — a healthy API replies 401 to the unauth'd request; only 5xx / timeout / connection error → down). No `status.anthropic.com` fallback — that source was too noisy and was retired.
 
 ### Things that have actually broken
 - **`/api/status` leaked check details to unauthenticated callers** (435c0f2) — exact IPs, hostnames, HTTP error bodies from internal hosts. Fix was symbolic labels only (`"egress IP mismatch"`, not the actual IP). Re-check after any edit to `buildP21Service`.
@@ -128,14 +137,48 @@ Update this file when a new class of regression bites us. Promote sections up th
 - [ ] `npm run db:generate` succeeds with no drift after schema edits.
 - [ ] After a migration, sign-in still creates a user row and a session row (Auth.js adapter still wired).
 - [ ] `drizzle/meta/_journal.json` is committed alongside the migration SQL file.
+- [ ] After the `0002` migration: `SELECT email, role FROM member` shows the seeded bootstrap admins (+ a row per pre-existing `user`). Some migration steps in `0002` are hand-written SQL appended after the generated `CREATE TABLE` — re-generating won't reproduce them, so don't regenerate `0002`.
 
 ### Things to watch for
-- **One Neon project only** (`<neon-project-id>`, Vercel-managed) — do *not* create a second project. See `docs/db.md`.
+- **One Neon project only** (`<neon-project-id>`, Vercel-managed, `aws-us-west-2`) — do *not* create a second project. See `docs/db.md`.
 - **Schema drift** — if you edit `src/db/schema.ts` without running `db:generate`, the deployed DB diverges silently. Always generate + commit the migration.
 
 ---
 
-## 6. UI / styling
+## 6. Retrieval / catalog-vector index
+
+**Surface:** `src/lib/ai/tools.ts` (`searchCatalog`), `src/lib/ai/embeddings.ts`, `src/lib/ai/qdrant.ts`, `src/db/schema.ts` (`catalog_item`), `drizzle/0002_*` + `drizzle/0003_*` + `drizzle/0004_*`, `scripts/backfill-catalog.ts`, `scripts/sync-catalog.ts`, `scripts/create-qdrant-collection.ts`, `src/app/api/cron/sync-catalog/route.ts`, `vercel.json` cron entry. See [`RETRIEVAL.md`](RETRIEVAL.md) for design and [`docs/Retrieval_Runbook.md`](docs/Retrieval_Runbook.md) for ops.
+
+**Why low (for now):** brand-new surface. The lock-step write order (Qdrant first, Neon hash second) is load-bearing and the most likely place a regression would surface.
+
+### Smoke check
+- [ ] Ask the chat a descriptive part question ("M10 stainless cap screw, around 50mm") → model picks `searchCatalog`, top result is the obvious SKU.
+- [ ] Ask an exact-SKU question ("show me PN12345-01") → model picks `entityGet` (or `viewsQuery`), **not** `searchCatalog`.
+- [ ] After `searchCatalog`, the model chains into `viewsQuery p21_view_inv_loc` for live stock.
+- [ ] `npx tsx --env-file=.env.local scripts/smoke-search-catalog.ts` passes all 10 hand-picked descriptive queries with the expected SKU in top-3 (runs against an isolated `olander-catalog-smoke` Qdrant collection that's torn down after). Add `VOYAGE_QPS_DELAY_MS=22000` only if Voyage is on the no-billing free tier (3 RPM cap).
+
+### Things to watch for
+- **Vector dim must stay 1024.** Every Voyage call pins `output_dimension=1024`; the Qdrant collection is created with `size: 1024` (validated by `scripts/create-qdrant-collection.ts` on every run — mismatch refuses to continue). A vendor default flip is the only realistic way this could break.
+- **Qdrant write must come before Neon hash update.** The backfill/sync code is written so Qdrant upsert happens first, then the Neon hash is bumped. If Qdrant fails, the Neon hash stays stale and the next sync retries. Reversing the order would create rows that *claim* to be embedded while Qdrant has no vector — silently missing from search until the row's text changes again. Don't refactor the write order without auditing this invariant.
+- **`delete_flag` lives in two places.** Soft-delete writes BOTH the Neon row (`set: { deleteFlag: true }`) AND the Qdrant payload (`setCatalogPayload(uid, { delete_flag: true })`). The query filter is on the Qdrant side. Forgetting to flip Qdrant leaves a "ghost" SKU answering descriptive queries even though Neon shows it deleted.
+- **`delete_flag` is boolean, not `'Y'`/`'N'`.** The droplet proxy normalizes P21's `"Y"`/`"N"` flags to JSON booleans before they reach us; both Neon's column and Qdrant's payload mirror that. Write `true`/`false`, query against `delete_flag = false`.
+- **Local backfill needs unblocked network access to the droplet AND respect the proxy's 30 RPM bucket.** The script's `PAGE_DELAY_MS` (default 2500) keeps us under that. Corporate TLS-interception middleboxes (Fortinet, Zscaler) break Let's Encrypt cert validation; production (Vercel) sees no middlebox.
+- **`/api/cron/sync-catalog` is gated on `CRON_SECRET`.** Without it, the endpoint always 401s. Confirm it's set in Vercel project env (Production + Preview). Also confirm `QDRANT_URL` and `QDRANT_API_KEY` are set there or the endpoint 503s with `qdrant_not_configured`.
+- **Voyage free tier without billing is 3 RPM / 10K TPM.** Production traffic needs a payment method on file; first 200M tokens stay free either way.
+- **Qdrant Cloud free tier is 4 GB / single node.** ~99K vectors at 1024d sits at ~700 MB, comfortable. The cap is the practical ceiling on adding a second collection (docs, customer embeddings) without upgrading.
+
+### When you change `embeddings.ts` or the embed-input shape
+- [ ] Run `npm test` — the unit tests pin `buildEmbedInput`'s exact output for several real Olander-shaped rows. Changing the shape changes every hash, which forces a full re-embed on next sync. Make sure that's what you want.
+- [ ] Sanity-check token usage in `backfill-catalog.ts` logs after a re-run — a runaway loop should hit the 50M cap; normal operation is ~3M tokens for a full catalog.
+
+### When you change `searchCatalog` or `qdrant.ts`
+- [ ] Run the smoke-search script — exercises the live Qdrant path end-to-end against a known-good 20-row corpus in an isolated collection.
+- [ ] If you change the returned columns, update `src/lib/ai/tool-labels.ts`'s `matchCount`/`extractRows` and `src/components/chat/ToolCallCard.tsx`'s `extractRows` branch so the UI still surfaces results.
+- [ ] If you change `QDRANT_COLLECTION` or dim, run `scripts/create-qdrant-collection.ts` first — it validates the existing collection matches the config and refuses to proceed on mismatch. Qdrant collections are fixed-dim at creation; a dim change requires a new collection.
+
+---
+
+## 7. UI / styling
 
 **Surface:** `src/app/globals.css`, `src/app/**/*.tsx`, `src/components/*`.
 

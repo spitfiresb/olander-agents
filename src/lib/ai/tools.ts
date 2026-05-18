@@ -1,5 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { embedQuery } from "@/lib/ai/embeddings";
+import { qdrantConfigured, searchCatalogByVector } from "@/lib/ai/qdrant";
 
 // Layer 3 chatbot tools. Both call the Layer 2 proxy on the droplet, which:
 //   - holds the P21 credentials
@@ -185,4 +187,87 @@ const entityGet = tool({
   },
 });
 
-export const tools = { viewsQuery, entityGet } as const;
+// ---------------------------------------------------------------------------
+// searchCatalog — semantic search over the parts catalog
+//
+// Backed by the Qdrant Cloud `olander-catalog` collection (1024d cosine).
+// One vector per inv_mast_uid, embedded once with voyage-4-large during
+// backfill. The Neon `catalog_item` table mirrors the row metadata + dedupe
+// hash but the live vectors live in Qdrant — see docs/Vector_Store.md.
+//
+// The model picks this tool for descriptive part questions ("M10 stainless
+// cap screw, ~50mm"), then chains into viewsQuery / entityGet for live
+// stock/pricing/order history.
+
+type SearchMatch = {
+  item_id: string;
+  item_desc: string | null;
+  extended_desc: string | null;
+  sales_pricing_unit: string | null;
+  score: number;
+};
+
+type SearchError =
+  | { error: "search_not_configured" }
+  | { error: "search_failed"; detail: string };
+
+const searchCatalog = tool({
+  description:
+    "Semantic search over Olander's parts catalog (the inventory master). Use this " +
+    "when the rep describes a part in their own words — e.g. \"M10 stainless cap " +
+    "screw, around 50mm\" or \"anti-seize for high-temp fasteners\". Returns the " +
+    "top-K candidate item_ids ranked by vector similarity. Follow up with viewsQuery " +
+    "against p21_view_inv_loc on the returned item_ids for live on-hand stock, or " +
+    "entityGet for the full record. DO NOT use this for exact-SKU lookups — use " +
+    "entityGet({ area:'inventory', resource:'v2/parts', id:<sku> }) for those " +
+    "(faster, authoritative). Returns { matches: [...] } with item_id, item_desc, " +
+    "extended_desc, sales_pricing_unit, and a cosine-similarity score in [0,1].",
+  inputSchema: z.object({
+    query: z
+      .string()
+      .min(2)
+      .max(256)
+      .describe(
+        "Natural-language description of the part. The rep's own phrasing is fine — " +
+          "don't translate to formal terminology.",
+      ),
+    topK: z.number().int().min(1).max(20).default(5),
+  }),
+  execute: async ({
+    query,
+    topK,
+  }): Promise<{ matches: SearchMatch[] } | SearchError> => {
+    if (!process.env.VOYAGE_API_KEY || !qdrantConfigured()) {
+      return { error: "search_not_configured" };
+    }
+    try {
+      const vec = await embedQuery(query);
+      // Filter delete_flag in Qdrant payload so soft-deleted SKUs never
+      // surface. Qdrant cosine score is in [-1, 1]; voyage embeddings come
+      // out normalized so the practical range is [0, 1] — pass through.
+      const result = await searchCatalogByVector(vec, topK);
+      const matches: SearchMatch[] = result.map((m) => {
+        const p = m.payload;
+        return {
+          item_id: typeof p.item_id === "string" ? p.item_id : "",
+          item_desc: typeof p.item_desc === "string" ? p.item_desc : null,
+          extended_desc:
+            typeof p.extended_desc === "string" ? p.extended_desc : null,
+          sales_pricing_unit:
+            typeof p.sales_pricing_unit === "string"
+              ? p.sales_pricing_unit
+              : null,
+          score: m.score,
+        };
+      });
+      return { matches };
+    } catch (e) {
+      return {
+        error: "search_failed",
+        detail: e instanceof Error ? e.message : String(e),
+      };
+    }
+  },
+});
+
+export const tools = { viewsQuery, entityGet, searchCatalog } as const;

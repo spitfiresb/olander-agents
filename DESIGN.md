@@ -121,7 +121,7 @@ The product is a **two-column app**: a charcoal sidebar (lg+) and a canvas main 
 ```
 DESKTOP (lg+)
 ┌──────────────┬────────────────────────────────────────┐
-│              │  thin demo-mode pill strip (h-12)      │
+│              │  thin top strip (h-12, account menu R) │
 │  SIDEBAR     ├────────────────────────────────────────┤
 │  charcoal    │                                        │
 │  bg          │  message list (max-w-3xl, gap-8)       │
@@ -212,11 +212,10 @@ MOBILE / TABLET (< lg)
 
 ### Pills
 
-A small but load-bearing pattern. Used four ways:
+A small but load-bearing pattern. Used three ways:
 
 ```
 - Suggestion chips (empty state)
-- Demo-mode indicator (desktop top strip)
 - Jump-to-latest (anchored over the message list)
 - Regenerate / message actions (under the latest assistant turn)
 

@@ -1,5 +1,5 @@
 {
-  "id": "3601b1aa-a9f5-4768-b4f1-78ae2054f6d4",
+  "id": "409b72c8-ea63-49d8-86a1-9f3de7b52332",
   "prevId": "845148ab-0387-430e-a2f1-34ed7baa116c",
   "version": "7",
   "dialect": "postgresql",
@@ -105,6 +105,89 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.catalog_item": {
+      "name": "catalog_item",
+      "schema": "",
+      "columns": {
+        "inv_mast_uid": {
+          "name": "inv_mast_uid",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item_desc": {
+          "name": "item_desc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "extended_desc": {
+          "name": "extended_desc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sales_pricing_unit": {
+          "name": "sales_pricing_unit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delete_flag": {
+          "name": "delete_flag",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "source_modified_at": {
+          "name": "source_modified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "embed_input_hash": {
+          "name": "embed_input_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "embedding": {
+          "name": "embedding",
+          "type": "vector(1024)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "embedded_at": {
+          "name": "embedded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "catalog_item_item_id_unique": {
+          "name": "catalog_item_item_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "item_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.conversation": {
       "name": "conversation",
       "schema": "",
@@ -144,12 +227,6 @@
         },
         "deletedAt": {
           "name": "deletedAt",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "pinnedAt": {
-          "name": "pinnedAt",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -238,13 +315,6 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
-        },
-        "searchText": {
-          "name": "searchText",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
         },
         "createdAt": {
           "name": "createdAt",

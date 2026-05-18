@@ -1,4 +1,4 @@
-import { auth } from "@/auth";
+import { activeSession } from "@/auth";
 import {
   createConversation,
   listConversations,
@@ -8,7 +8,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const session = await auth();
+  const session = await activeSession();
   if (!session?.user) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -20,7 +20,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const session = await auth();
+  const session = await activeSession();
   if (!session?.user) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }

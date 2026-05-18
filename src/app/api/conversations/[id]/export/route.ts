@@ -1,4 +1,4 @@
-import { auth } from "@/auth";
+import { activeSession } from "@/auth";
 import { exportConversationMarkdown } from "@/lib/conversations";
 
 export const dynamic = "force-dynamic";
@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function GET(_req: Request, ctx: Ctx) {
-  const session = await auth();
+  const session = await activeSession();
   if (!session?.user) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }

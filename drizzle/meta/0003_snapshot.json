@@ -1,6 +1,6 @@
 {
-  "id": "c4bb4eac-5916-4624-b0be-6d2369643594",
-  "prevId": "3601b1aa-a9f5-4768-b4f1-78ae2054f6d4",
+  "id": "2be9d197-3ac9-42d6-9794-499517c7f6e1",
+  "prevId": "409b72c8-ea63-49d8-86a1-9f3de7b52332",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -105,6 +105,83 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.catalog_item": {
+      "name": "catalog_item",
+      "schema": "",
+      "columns": {
+        "inv_mast_uid": {
+          "name": "inv_mast_uid",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item_desc": {
+          "name": "item_desc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "extended_desc": {
+          "name": "extended_desc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sales_pricing_unit": {
+          "name": "sales_pricing_unit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delete_flag": {
+          "name": "delete_flag",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "source_modified_at": {
+          "name": "source_modified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "embed_input_hash": {
+          "name": "embed_input_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "embedded_at": {
+          "name": "embedded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "catalog_item_item_id_unique": {
+          "name": "catalog_item_item_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "item_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.conversation": {
       "name": "conversation",
       "schema": "",
@@ -144,12 +221,6 @@
         },
         "deletedAt": {
           "name": "deletedAt",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "pinnedAt": {
-          "name": "pinnedAt",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -239,25 +310,12 @@
           "primaryKey": false,
           "notNull": false
         },
-        "searchText": {
-          "name": "searchText",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
         "createdAt": {
           "name": "createdAt",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "supersededAt": {
-          "name": "supersededAt",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -272,27 +330,6 @@
             },
             {
               "expression": "createdAt",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "msg_conv_superseded_idx": {
-          "name": "msg_conv_superseded_idx",
-          "columns": [
-            {
-              "expression": "conversationId",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "supersededAt",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

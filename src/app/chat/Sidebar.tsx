@@ -99,8 +99,8 @@ export function Sidebar({
     <aside className="flex h-full w-full shrink-0 flex-col bg-brand-charcoal lg:w-64">
       <div className="px-5 pb-4 pt-5">
         <Link
-          href="/"
-          aria-label="Olander Agents — back to home"
+          href="/chat"
+          aria-label="Olander Agents — chat home"
           className="inline-block rounded-sm transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal"
         >
           <Wordmark variant="topbar" />

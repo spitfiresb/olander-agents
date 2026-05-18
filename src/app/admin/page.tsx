@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
 import { auth } from "@/auth";
+import { BackLink } from "@/components/BackLink";
 
 export default async function AdminPage() {
   const session = await auth();
@@ -10,7 +11,8 @@ export default async function AdminPage() {
   return (
     <div className="min-h-dvh bg-brand-canvas">
       <div className="mx-auto max-w-3xl px-6 py-10">
-        <h1 className="text-2xl font-semibold text-brand-charcoal">Admin</h1>
+        <BackLink href="/chat">Back to chat</BackLink>
+        <h1 className="mt-4 text-2xl font-semibold text-brand-charcoal">Admin</h1>
         <p className="mt-2 text-sm text-brand-ink-soft">
           Operational views. Visible only to accounts with the{" "}
           <code className="font-mono text-[12px]">admin</code> role.
@@ -40,14 +42,17 @@ export default async function AdminPage() {
               30-day token rollup and estimated Anthropic spend.
             </div>
           </Link>
-        </div>
 
-        <div className="mt-8">
           <Link
-            href="/chat"
-            className="text-sm text-brand-ink-soft underline-offset-2 hover:underline"
+            href="/admin/members"
+            className="block rounded-2xl border border-brand-charcoal/10 bg-white p-5 transition-colors hover:border-brand-charcoal/30 hover:bg-brand-sand/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red"
           >
-            ← Back to chat
+            <div className="text-base font-medium text-brand-charcoal">
+              Members
+            </div>
+            <div className="mt-1 text-sm text-brand-ink-soft">
+              Control who can sign in and who&apos;s an admin.
+            </div>
           </Link>
         </div>
       </div>

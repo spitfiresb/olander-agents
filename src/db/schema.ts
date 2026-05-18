@@ -6,12 +6,19 @@ import {
   primaryKey,
   jsonb,
   index,
+  boolean,
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
 
-// Kept as text rather than pgEnum so adding tiers later is a no-op migration.
-// Olander hasn't finalized access tiers yet (open question in README).
-export type Role = "admin" | "user";
+// Catalog vectors live in Qdrant, not Postgres — see docs/Vector_Store.md.
+// The pgvector extension stays enabled on Neon (no-op cost) in case future
+// smaller indexes want it back.
+
+// Kept as text rather than pgEnum so adding tiers is a no-op migration — adding
+// `revoked` here required zero schema change (the new `member` table did need
+// one). `revoked` = blocked from everything, but the user's row and chat
+// history are kept; see src/lib/members.ts and the `member` table below.
+export type Role = "admin" | "user" | "revoked";
 
 export const users = pgTable("user", {
   id: text("id")
@@ -63,6 +70,24 @@ export const verificationTokens = pgTable(
   },
   (vt) => [primaryKey({ columns: [vt.identifier, vt.token] })]
 );
+
+// Sign-in allowlist. One row per email that is permitted to sign in, plus the
+// tier they get. This is the source of truth that the `signIn` callback checks
+// (src/auth.ts) and that the rest of the app's `user.role` is reconciled from
+// on every login. A `member` row is required to sign in *and* the Entra `tid`
+// claim must match (see src/lib/auth-allowlist.ts). `email` is stored
+// lowercased/trimmed. `addedBy` is the admin's user.id (null for rows
+// backfilled or seeded by a migration); deliberately NOT a FK so removing an
+// admin doesn't cascade-delete the audit of who added whom. Managed at
+// /admin/members. See docs/db.md.
+export const members = pgTable("member", {
+  email: text("email").primaryKey(),
+  role: text("role").$type<Role>().notNull().default("user"),
+  addedBy: text("addedBy"),
+  createdAt: timestamp("createdAt", { mode: "date", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
 
 // --- Chat persistence (TODO §3) --------------------------------------------
 // One row per chat. `deletedAt` is the soft-delete tombstone; reads filter on
@@ -131,6 +156,36 @@ export const messages = pgTable(
     index("msg_conv_superseded_idx").on(t.conversationId, t.supersededAt),
   ],
 );
+
+// Catalog row metadata — one row per inv_mast_uid mirroring p21_view_inv_mast.
+// The actual vector lives in Qdrant (see src/lib/ai/qdrant.ts) keyed on the
+// same inv_mast_uid. This table carries:
+//   - `embed_input_hash`: dedupe key for backfill / sync. Same text ⇒ same
+//     hash ⇒ no re-embed, no Qdrant re-upsert.
+//   - the descriptive fields: source of truth for any callers that need the
+//     full row without a Qdrant fetch (audit, exports, future joins).
+// `embeddedAt` records when we last pushed this row's vector to Qdrant.
+export const catalogItem = pgTable("catalog_item", {
+  invMastUid: integer("inv_mast_uid").primaryKey(),
+  // NOT unique. Olander's P21 has duplicate item_ids across inv_mast_uids —
+  // typically multi-company catalogs that mint internal SKU numbers per
+  // company, which can collide across companies (real example: 597906
+  // showed up in two different inv_mast_uids during the 2026-05-12
+  // backfill). inv_mast_uid is the only stable unique key.
+  itemId: text("item_id").notNull(),
+  itemDesc: text("item_desc"),
+  extendedDesc: text("extended_desc"),
+  salesPricingUnit: text("sales_pricing_unit"),
+  deleteFlag: boolean("delete_flag").notNull().default(false),
+  sourceModifiedAt: timestamp("source_modified_at", {
+    withTimezone: true,
+    mode: "date",
+  }),
+  embedInputHash: text("embed_input_hash").notNull(),
+  embeddedAt: timestamp("embedded_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+});
 
 // Flattened audit log of tool calls — denormalized from messages.parts so
 // /admin/audit can grep without loading every assistant message.

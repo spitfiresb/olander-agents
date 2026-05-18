@@ -17,6 +17,11 @@ type EntityGetInput = {
   id?: string;
 };
 
+type SearchCatalogInput = {
+  query?: string;
+  topK?: number;
+};
+
 const VIEW_LABELS: Record<string, string> = {
   p21_view_inv_mast: "Inventory search",
   p21_view_inv_loc: "Stock-on-hand lookup",
@@ -52,6 +57,12 @@ export function labelForToolPart(
     const key = area && resource ? `${area}/${resource}` : "";
     const base = ENTITY_LABELS[key] ?? "Record lookup";
     return { label: base, sublabel: v.id ? `id ${v.id}` : undefined };
+  }
+  if (toolName === "searchCatalog") {
+    const v = (input ?? {}) as SearchCatalogInput;
+    const q = (v.query ?? "").trim();
+    const sub = q ? (q.length > 48 ? `"${q.slice(0, 45)}…"` : `"${q}"`) : undefined;
+    return { label: "Catalog search", sublabel: sub };
   }
   return { label: toolName };
 }
@@ -93,6 +104,11 @@ export function summarizeToolUsageForCitation(
     const what = v.resource ?? v.area ?? "record";
     return `${what} (1 record)`;
   }
+  if (toolName === "searchCatalog") {
+    const matches = matchCount(output);
+    if (matches == null) return "catalog search";
+    return `catalog search (${matches} match${matches === 1 ? "" : "es"})`;
+  }
   return null;
 }
 
@@ -104,6 +120,14 @@ function countRows(output: unknown): number | null {
   if (output && typeof output === "object" && "count" in output) {
     const c = (output as { count?: unknown }).count;
     if (typeof c === "number") return c;
+  }
+  return null;
+}
+
+function matchCount(output: unknown): number | null {
+  if (output && typeof output === "object" && "matches" in output) {
+    const matches = (output as { matches?: unknown }).matches;
+    if (Array.isArray(matches)) return matches.length;
   }
   return null;
 }

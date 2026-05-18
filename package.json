@@ -21,6 +21,7 @@
     "@ai-sdk/react": "^3.0.177",
     "@auth/drizzle-adapter": "^1.11.2",
     "@neondatabase/serverless": "^1.1.0",
+    "@qdrant/js-client-rest": "^1.18.0",
     "@vercel/blob": "^2.3.3",
     "ai": "^6.0.175",
     "drizzle-orm": "^0.45.2",

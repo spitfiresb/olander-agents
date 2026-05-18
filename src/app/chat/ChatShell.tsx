@@ -580,20 +580,18 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
             <HamburgerIcon />
           </button>
           <Link
-            href="/"
-            aria-label="Olander Agents — back to home"
-            className="mx-auto rounded-sm transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal"
+            href="/chat"
+            aria-label="Olander Agents — chat home"
+            className="rounded-sm transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal"
           >
             <Wordmark variant="topbar" />
           </Link>
           <AccountMenu variant="charcoal" isAdmin={isAdmin} />
         </header>
 
-        {/* Desktop top strip with status pill (hidden under lg) */}
+        {/* Desktop top strip (hidden under lg). Holds the account menu on
+            the right; centred content slot intentionally empty. */}
         <header className="relative hidden h-12 shrink-0 items-center justify-center border-b border-brand-charcoal/[0.06] lg:flex">
-          <span className="rounded-full border border-brand-charcoal/10 bg-white px-3 py-1 text-xs text-brand-ink-soft">
-            Demo mode — sample data only
-          </span>
           <div className="absolute inset-y-0 right-4 flex items-center">
             <AccountMenu variant="canvas" isAdmin={isAdmin} />
           </div>

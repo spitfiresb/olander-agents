@@ -2,15 +2,15 @@
 
 Postgres lives on Neon, provisioned through the Vercel-Neon integration on the `olander-agents` Vercel project. The app talks to it through Drizzle ORM. The schema is the standard Auth.js (next-auth) Drizzle adapter shape plus a `role` column on `user` for our tier model.
 
-There is **one** Neon project. If you find a second one, something is wrong — see [History](#history) below.
+There is **one** Neon project. If you find a second one, something is wrong.
 
 ## Where it lives
 
 - **Neon project:** `olander-agents` (id `<neon-project-id>`)
 - **Neon org:** `Vercel: olanderagents-9868's projects` — managed by Vercel, do not detach
-- **Region:** `aws-us-east-1`
+- **Region:** `aws-us-west-2` (Portland / pdx1, to sit next to the sfo1 Vercel functions and us-west-1 Qdrant)
 - **Postgres version:** 17
-- **Default branch:** `main` (id `br-bold-rice-apsq5gqy`)
+- **Default branch:** `main` (find current id in Neon console)
 - **Database:** `neondb`
 - **Console:** https://console.neon.tech/app/projects/<neon-project-id>
 
@@ -37,19 +37,37 @@ Vercel sets `DATABASE_URL` plus a few aliases (`POSTGRES_URL`, `POSTGRES_URL_NON
 
 ## Schema
 
-Defined in `src/db/schema.ts`. Four tables, all in the `public` schema:
+Defined in `src/db/schema.ts`. Core tables (the chat-persistence tables — `conversation`, `message`, `toolCall` — are also in `schema.ts`; see CLAUDE.md), all in the `public` schema:
 
 | Table | Purpose |
 |---|---|
-| `user` | One row per signed-in human. Includes a `role` column (`'admin' \| 'user'`) for tier gating |
+| `user` | One row per signed-in human. `role` (`'admin' \| 'user' \| 'revoked'`) drives tier gating; it is *reconciled from* `member.role` on every login (see [Sign-in allowlist](#sign-in-allowlist)) — `member` is the source of truth |
 | `account` | OAuth provider linkage (Microsoft Entra today). Composite PK on `(provider, providerAccountId)` |
 | `session` | DB-backed session tokens (we use the database session strategy, not JWT) |
 | `verificationToken` | Magic-link / email verification tokens. Unused with Entra-only sign-in but the adapter requires the table |
+| `member` | Sign-in allowlist: one row per email permitted to sign in, plus its tier. PK on `email` (lowercased). `addedBy` = the admin's `user.id` (null for migration-seeded/backfilled rows; not an FK on purpose). Reads/writes via `src/lib/members.ts`; managed at `/admin/members`. See [Sign-in allowlist](#sign-in-allowlist) |
 
 Two intentional design calls worth knowing:
 
-- **`role` is `text`, not `pgEnum`.** Adding new tiers later (e.g., `viewer`, `auditor`) becomes a code change with no DDL migration. `Role` is exported as a TS union from `schema.ts` for type-safety in app code.
+- **`role` is `text`, not `pgEnum`.** Adding tiers is a code change with no DDL migration — adding `revoked` was exactly this (only the new `member` table needed a migration). `Role` is exported as a TS union from `schema.ts` for type-safety in app code.
 - **`emailVerified` is left null for OAuth users.** Auth.js stamps that column only for the magic-link/email flow. Entra has already verified the user's email before issuing the OAuth token, so the null is expected. Don't write app code that gates on `if (user.emailVerified)`.
+
+## Sign-in allowlist
+
+Who may sign in is two gates, both required (see `src/auth.ts` `signIn` callback):
+
+1. **Entra tenant (`tid`) check** — `AUTH_ALLOWED_TENANT_IDS`. The cryptographic boundary; `tid` is bound to Microsoft's per-tenant signing key. Empty ⇒ fails closed. Lives in `src/lib/auth-allowlist.ts` (kept pure for unit tests).
+2. **Per-email membership** — a row in the `member` table whose `role` is not `revoked`, *or* the email is in `AUTH_BOOTSTRAP_ADMINS` (a comma-separated env var of always-allowed/always-admin emails — first-admin bootstrap + break-glass; see `.env.example`). Lives in `src/lib/members.ts`.
+
+Tiers (`member.role`, mirrored onto `user.role`):
+
+- `user` — normal access.
+- `admin` — also sees `/admin/*` (audit, usage, members).
+- `revoked` — blocked from everything: `signIn` denies them, and setting `revoked` (the "Remove user" button in `/admin/members`) immediately deletes their `session` rows so any live session ends now. Their `user` row, conversations, and tool-call audit history are kept. The row stays in the table but is hidden from `/admin/members` — re-add the email there to restore access (`addMember` upserts). `src/auth.ts` exports `activeSession()` (= `auth()` but returns null for `revoked`) which the chat pages/routes use as a backstop for the revoke-vs-session-delete race window.
+
+`events.signIn` in `src/auth.ts` reconciles `user.role` from `member.role` on **every** login — the adapter creates a new `user` row with the schema default (`user`), so this is what actually applies an `admin` tier to someone an admin invited before they ever signed in, and it self-heals after any later tier change.
+
+The `0002` migration creates `member`, backfills it from existing `user` rows (so nobody currently signed in is locked out by the switch from a domain allowlist), and seeds the project owners as bootstrap admins. Verify with `SELECT email, role FROM member ORDER BY "createdAt"`.
 
 ### The `neon_auth` schema (Vercel integration extra)
 
@@ -97,7 +115,7 @@ If you're prototyping a schema change locally and want to throw it away, push ag
 `.env.local` (gitignored) needs at minimum:
 
 ```
-DATABASE_URL=postgresql://neondb_owner:<password>@<neon-host>.neon.tech/neondb?channel_binding=require&sslmode=require
+DATABASE_URL=postgresql://neondb_owner:<password>@<neon-host>.neon.tech/neondb?sslmode=require
 ```
 
 Use the **direct** (non-`-pooler`) host for local — Drizzle-kit will be unhappy with the pooler for some DDL operations.
@@ -115,24 +133,6 @@ To get the password without copy-pasting from someone else:
 - **Sign-in produces three rows.** A successful Entra sign-in writes one row each to `user`, `account`, and `session`. If you see fewer, the adapter wiring is broken — start from `src/auth.ts`.
 - **Drizzle's own table.** `neondb.drizzle.__drizzle_migrations` tracks which migrations have been applied. Don't touch it manually unless you know what you're doing.
 - **Auth.js requires the database session strategy** (configured in `src/auth.ts`) for the Drizzle adapter to populate the `session` table. JWT-strategy sessions skip the DB entirely — switching strategies would break our user-tier model unless the role is duplicated into the JWT.
-
-## History
-
-Date: 2026-05-09 to 2026-05-10.
-
-The project initially had **two** Neon projects, which is why this doc keeps emphasizing one:
-
-1. A standalone `Olander Agents` project in us-west-2 — created manually, was where local dev pointed and where the schema first landed.
-2. The Vercel-managed `olander-agents` project in us-east-1 — created when the Vercel-Neon integration was installed.
-
-Local dev had been writing schema (and would have written user data) into #1, while any deployed Vercel build would have hit #2 with no schema. We consolidated onto #2 by:
-
-- Pointing `.env.local` at #2's direct host
-- Generating and applying the initial Drizzle migration (`0000_talented_invisible_woman.sql`)
-- Verifying end-to-end Entra sign-in landed rows in #2
-- Deleting #1
-
-The standalone `Olander Agents` Neon org still exists but is empty. Neon doesn't expose org deletion via API/MCP — clean it up from the console if it bothers you.
 
 ## Quick reference
 
@@ -154,6 +154,8 @@ Files to read for more depth:
 
 - `src/db/schema.ts` — table definitions
 - `src/db/index.ts` — Drizzle client setup (HTTP driver via `@neondatabase/serverless`)
-- `src/auth.ts` — Auth.js config + Drizzle adapter wiring
+- `src/auth.ts` — Auth.js config + Drizzle adapter wiring + `events.signIn` reconciler + `activeSession()`
+- `src/lib/members.ts` — `member`-table reads/writes + the sign-in membership check
+- `src/lib/auth-allowlist.ts` — pure tenant check + email normalization (unit-tested)
 - `drizzle.config.ts` — drizzle-kit config (reads `.env.local`)
 - `drizzle/0000_talented_invisible_woman.sql` — initial schema as applied SQL

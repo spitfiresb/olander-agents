@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { toolCalls, users } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
+import { BackLink } from "@/components/BackLink";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,8 @@ export default async function AuditPage() {
   return (
     <div className="min-h-dvh bg-brand-canvas">
       <div className="mx-auto max-w-5xl px-6 py-10">
-        <h1 className="text-2xl font-semibold text-brand-charcoal">Tool-call audit</h1>
+        <BackLink href="/admin">Back to admin</BackLink>
+        <h1 className="mt-4 text-2xl font-semibold text-brand-charcoal">Tool-call audit</h1>
         <p className="mt-2 text-sm text-brand-ink-soft">
           Last 200 tool calls. Args column is the filter / id used; result
           payloads are not echoed here (they can be large).
