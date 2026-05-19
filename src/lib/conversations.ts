@@ -279,6 +279,15 @@ export async function appendMessages(
   // message row without its tool_call audit entries, or a missing
   // updatedAt bump — both tolerable on a denormalized audit log, and worth
   // not adding a second DB driver just for atomicity.
+  //
+  // ON CONFLICT (id) DO NOTHING: makes the insert idempotent when the
+  // caller-supplied id collides with an existing row. The realistic case is
+  // a provider failure mid-turn — useChat retries with the same client-side
+  // message id, so the user-message row already exists from the first
+  // attempt and a plain INSERT would 23505. The conflicting row is silently
+  // skipped from `inserted`/RETURNING, which is fine: the downstream
+  // tool-call extraction only iterates assistant messages, and an already-
+  // persisted user message has nothing new to write.
   const inserted = await db
     .insert(messages)
     .values(
@@ -295,6 +304,7 @@ export async function appendMessages(
         searchText: extractSearchText(m.parts),
       })),
     )
+    .onConflictDoNothing({ target: messages.id })
     .returning({ id: messages.id, parts: messages.parts, role: messages.role });
 
   const toolRows: (typeof toolCalls.$inferInsert)[] = [];
