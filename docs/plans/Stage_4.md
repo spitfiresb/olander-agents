@@ -1,6 +1,6 @@
 # Stage 4 — Chat-header dropdown + empty-state polish + tool-result actions
 
-**Status:** 4a in progress (started 2026-05-18). 4b and 4c queued.
+**Status:** 4a **shipped 2026-05-18** (commits `bd4cac6` refactor + `99cbabc` feature). 4b and 4c queued.
 
 A self-contained plan doc so a future session can pick up Stage 4 without
 re-deriving anything from conversation history. Companion to `handoff.md`
@@ -85,22 +85,27 @@ bg-brand-charcoal/10" />`.
 
 ### Files
 
-#### Create
+#### Created
 
 | Path | Purpose |
 |---|---|
 | `src/app/chat/ChatHeader.tsx` | Title + chevron trigger + dropdown menu + inline rename mode |
 | `src/app/chat/RenameInput.tsx` | Extracted from `Sidebar.tsx` so the header can reuse it verbatim |
-| `src/app/chat/__tests__/ChatHeader.test.tsx` | Render + menu open/close + Esc-closes + rename submit + disabled-Delete-while-streaming |
+| `src/lib/slug.ts` | Filename-safe slug helper for export filenames |
+| `src/lib/__tests__/slug.test.ts` | 7 unit tests on `slugify` (cases, diacritics, cap, edge cases, fastener title) |
 
-#### Modify
+**Originally planned `src/app/chat/__tests__/ChatHeader.test.tsx`** — dropped. The codebase's vitest config is `environment: "node"` with zero existing React component tests. Standing up jsdom + React Testing Library for one component is its own conversation; not in 4a scope. Component behavior verified via local browser smoke.
 
-| Path | What changes |
+#### Modified
+
+| Path | What changed |
 |---|---|
-| `src/app/chat/ChatShell.tsx` | Compute `activeConversation` from the `conversations` array + `conversationId`; render `<ChatHeader />` inside the desktop top strip and as a new second mobile bar; pass through existing `onRenameConversation` / `onTogglePin` / `onDeleteConversation` handlers; rework desktop strip layout from `justify-center` to `justify-between` |
-| `src/app/chat/Sidebar.tsx` | Import `RenameInput` from the new file; import `TrashIcon` from the shared icons module. **No behavior change.** |
-| `src/components/icons.tsx` | Add `ChevronDownIcon`, `DownloadIcon`, and the lifted `TrashIcon`. All stroke-based, single-color, matching the existing icon vocabulary |
-| `src/app/api/conversations/[id]/export/route.ts` | Switch `Content-Disposition` filename from `conversation-{id}.md` to a slugified title (fallback to id for empty/whitespace titles) |
+| `src/app/chat/ChatShell.tsx` | Derived `activeConversation` from the `conversations` array + `conversationId`; renders `<ChatHeader />` inside the desktop top strip and as a new mobile chat-title bar; reworked desktop strip from `justify-center` to `justify-between`; added `deleteWithConfirm` helper around `onDeleteConversation` (native `window.confirm` per the decision table above) |
+| `src/app/chat/Sidebar.tsx` | Imports `RenameInput` from the new file; imports `TrashIcon` from the shared icons module. No behavior change |
+| `src/components/icons.tsx` | Added `ChevronDownIcon`, `DownloadIcon`, and the lifted `TrashIcon` |
+| `src/lib/conversations.ts` | `exportConversationMarkdown` return type widened from `Promise<string \| null>` to `Promise<{ markdown: string; title: string } \| null>` so the route can use the title for the filename |
+| `src/app/api/conversations/[id]/export/route.ts` | Switched `Content-Disposition` filename from `conversation-{id}.md` to `${slugify(title) || id}.md` |
+| `scripts/verify-persistence.ts` | Updated for the new `exportConversationMarkdown` return shape |
 
 ### Component shape — `ChatHeader.tsx`
 
@@ -216,15 +221,21 @@ Tailwind tokens.
 
 ### Testing
 
-#### Vitest (new)
-- ChatHeader renders title and chevron when given an active conversation
-- Click trigger opens menu; Esc closes; click-outside closes
-- Click Rename swaps title for input; Enter submits; Esc cancels
-- Pin/Unpin label and glyph reflect `pinnedAt` prop
-- Delete menu item disabled when `status="streaming"`
+#### Vitest (added)
+- 7 new tests on `slugify` (`src/lib/__tests__/slug.test.ts`):
+  spaces/casing, diacritics, runs of punctuation, 80-char cap,
+  empty/punctuation-only fallback, fastener-shaped real-world title
 
 #### Vitest (regression)
-- Existing sidebar tests pass after the `RenameInput` extraction
+- All existing tests pass after the `RenameInput` extraction + the
+  `exportConversationMarkdown` return-type widening
+- Total run: 100 tests pass (was 93 before slug, 77 in pre-merge handoff)
+
+#### Vitest (originally planned, deferred)
+- `ChatHeader.test.tsx` — codebase has no React component test
+  infrastructure (vitest is node-environment). Standing up jsdom + RTL
+  for one component is its own scoping discussion; component behavior
+  verified via local browser smoke instead.
 
 #### Browser smoke (local, no Vercel preview required)
 1. Sign in, open a chat with messages
