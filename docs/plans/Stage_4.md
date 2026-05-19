@@ -3,8 +3,8 @@
 **Status (2026-05-19):**
 - **4a — Chat-header dropdown — shipped** (`bd4cac6` refactor + `99cbabc` feature)
 - **4b — Empty-state recent-conversation cards — shipped** (`61c164a` API snippet + `ba0d48f` UI)
-- **Maintenance fix in flight:** `5a188bf` (idempotent user-message insert on retry)
-- **4c — Tool-result actions — planned, awaiting C1–C5 ratification.** Two-commit plan; no DB migration; no new deps; ~25 unit tests on the serializers.
+- **Maintenance fix:** `5a188bf` (idempotent user-message insert on retry)
+- **4c — Tool-result actions — shipped** (`70a6907` serializers + `0c6bf6d` UI). C1–C5 ratified with recommendations. Stage 4 complete.
 
 A self-contained plan doc so a future session can pick up Stage 4 without
 re-deriving anything from conversation history. Companion to `handoff.md`
@@ -344,9 +344,9 @@ or whether a more guided / branded first-run experience earns its keep.
 
 ## Stage 4c — Tool-result actions
 
-**Status:** planned 2026-05-19, awaiting user ratification of C1–C5
-(see end of this section). Two-commit execution plan; ~25 unit tests;
-no new deps; no DB migration.
+**Status:** **shipped 2026-05-19.** Commits `70a6907` (serializers +
+23 unit tests) + `0c6bf6d` (ToolCallCard integration). User ratified
+C1–C5 with the baked-in recommendations.
 
 ### Deliverable
 
