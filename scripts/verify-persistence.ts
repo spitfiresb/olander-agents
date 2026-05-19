@@ -68,8 +68,15 @@ async function main() {
   const tcRows = await db.select().from(toolCalls).where(eq(toolCalls.conversationId, conv.id));
   console.log("flattened tool_calls:", tcRows.length, tcRows[0]?.toolName);
 
-  const md = await exportConversationMarkdown(user.id, conv.id);
-  console.log("export markdown length:", md?.length, "starts with:", md?.slice(0, 40));
+  const exported = await exportConversationMarkdown(user.id, conv.id);
+  console.log(
+    "export markdown length:",
+    exported?.markdown.length,
+    "title:",
+    exported?.title,
+    "starts with:",
+    exported?.markdown.slice(0, 40),
+  );
 
   const deleted = await softDeleteConversation(user.id, conv.id);
   console.log("soft-deleted:", deleted);

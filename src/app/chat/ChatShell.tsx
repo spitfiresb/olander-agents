@@ -12,6 +12,7 @@ import {
 } from "react";
 import { HamburgerIcon } from "@/components/icons";
 import { Wordmark } from "@/components/Wordmark";
+import { ChatHeader } from "./ChatHeader";
 import { Composer, type ComposerAttachment } from "./Composer";
 import { MessageList } from "./MessageList";
 import { MobileSidebarDrawer } from "./MobileSidebarDrawer";
@@ -520,6 +521,23 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
     }
   }
 
+  // Active conversation row pulled from the same array the sidebar reads.
+  // Brief gap on deep-link entry (conversations starts as [] until the
+  // initial refreshConversations resolves) — the header just doesn't render
+  // for that beat, then fades in with the rest of the page.
+  const activeConversation = conversationId
+    ? conversations.find((c) => c.id === conversationId) ?? null
+    : null;
+
+  // Single confirm dialog for chat-header delete. Native confirm for v1 —
+  // Stage 5 lifts to the admin-style animated dialog alongside a similar
+  // sidebar uplift (sidebar delete is currently un-confirmed too).
+  function deleteWithConfirm(id: string) {
+    if (window.confirm("Delete this conversation? This can't be undone.")) {
+      void onDeleteConversation(id);
+    }
+  }
+
   return (
     <div className="flex h-dvh bg-brand-canvas">
       {/* Desktop sidebar (hidden under lg). The mobile drawer below renders
@@ -589,12 +607,43 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
           <AccountMenu variant="charcoal" isAdmin={isAdmin} />
         </header>
 
-        {/* Desktop top strip (hidden under lg). Holds the account menu on
-            the right; centred content slot intentionally empty. */}
-        <header className="relative hidden h-12 shrink-0 items-center justify-center border-b border-brand-charcoal/[0.06] lg:flex">
-          <div className="absolute inset-y-0 right-4 flex items-center">
-            <AccountMenu variant="canvas" isAdmin={isAdmin} />
-          </div>
+        {/* Mobile chat-title bar (hidden on lg+). Sits below the charcoal
+            app-chrome bar; canvas bg so the active chat reads as content,
+            not chrome. Renders only when a conversation is loaded. */}
+        {activeConversation && (
+          <header className="flex h-11 shrink-0 items-center border-b border-brand-charcoal/[0.06] bg-brand-canvas px-3 lg:hidden">
+            <ChatHeader
+              conversationId={activeConversation.id}
+              title={activeConversation.title}
+              pinnedAt={activeConversation.pinnedAt}
+              status={status}
+              onRename={onRenameConversation}
+              onTogglePin={onTogglePin}
+              onDelete={deleteWithConfirm}
+              variant="mobile"
+            />
+          </header>
+        )}
+
+        {/* Desktop top strip (hidden under lg). Left: active-chat title +
+            dropdown menu (only when a conversation is loaded). Right:
+            account menu. */}
+        <header className="hidden h-12 shrink-0 items-center justify-between border-b border-brand-charcoal/[0.06] px-4 lg:flex">
+          {activeConversation ? (
+            <ChatHeader
+              conversationId={activeConversation.id}
+              title={activeConversation.title}
+              pinnedAt={activeConversation.pinnedAt}
+              status={status}
+              onRename={onRenameConversation}
+              onTogglePin={onTogglePin}
+              onDelete={deleteWithConfirm}
+              variant="desktop"
+            />
+          ) : (
+            <div />
+          )}
+          <AccountMenu variant="canvas" isAdmin={isAdmin} />
         </header>
 
         <main className="flex min-h-0 flex-1 flex-col">

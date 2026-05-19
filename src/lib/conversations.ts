@@ -352,7 +352,7 @@ export function extractSearchText(parts: unknown): string {
 export async function exportConversationMarkdown(
   userId: string,
   conversationId: string,
-): Promise<string | null> {
+): Promise<{ markdown: string; title: string } | null> {
   const conv = await getConversation(userId, conversationId);
   if (!conv) return null;
   const rows = await db
@@ -393,7 +393,7 @@ export async function exportConversationMarkdown(
     }
     lines.push(``);
   }
-  return lines.join("\n");
+  return { markdown: lines.join("\n"), title: conv.title };
 }
 
 // Daily token/usage rollup for /admin/usage. Sum across users; the route is
