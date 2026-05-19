@@ -17,6 +17,22 @@ export function deriveTitleFromText(text: string): string {
     : trimmed;
 }
 
+// Correlated subquery used by both list+search to fetch each conversation's
+// first user-message text as a snippet for the empty-state recent-chat cards
+// (Stage 4b). LEFT(..., 220) caps bandwidth — CSS line-clamp truncates the
+// visible portion; 220 is just a buffer so the clamp boundary always lands
+// before the DB cap. Filters supersededAt IS NULL so edit-and-resend doesn't
+// resurrect a dropped first message into the card.
+const firstUserSnippetSql = sql<string | null>`(
+  SELECT LEFT(m."searchText", 220)
+  FROM ${messages} m
+  WHERE m."conversationId" = ${conversations.id}
+    AND m."role" = 'user'
+    AND m."supersededAt" IS NULL
+  ORDER BY m."createdAt" ASC
+  LIMIT 1
+)`;
+
 export async function listConversations(userId: string) {
   return db
     .select({
@@ -24,6 +40,7 @@ export async function listConversations(userId: string) {
       title: conversations.title,
       updatedAt: conversations.updatedAt,
       pinnedAt: conversations.pinnedAt,
+      snippet: firstUserSnippetSql,
     })
     .from(conversations)
     .where(and(eq(conversations.userId, userId), isNull(conversations.deletedAt)))
@@ -53,6 +70,7 @@ export async function searchConversations(userId: string, query: string) {
       title: conversations.title,
       updatedAt: conversations.updatedAt,
       pinnedAt: conversations.pinnedAt,
+      snippet: firstUserSnippetSql,
       rank: sql<number>`
         coalesce(
           max(ts_rank_cd(${messages}."searchVector", plainto_tsquery('english', ${trimmed}))),

@@ -22,6 +22,11 @@ export type ConversationSummary = {
   title: string;
   updatedAt: string;
   pinnedAt: string | null;
+  // First user-message text (capped at 220 chars server-side). Used by the
+  // empty-state recent-chat cards in Stage 4b. Null when the first user
+  // message had no text parts (e.g. attachment-only). Sidebar doesn't
+  // render this, just propagates it through ChatShell to EmptyState.
+  snippet: string | null;
 };
 
 type Props = {
