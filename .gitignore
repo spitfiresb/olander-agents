@@ -43,3 +43,16 @@ next-env.d.ts
 
 # claude code local state
 .claude/
+.env*.local
+
+# local session captures (screenshots at repo root)
+/aiva-*.png
+/polish-*.png
+/stage3-*.png
+/post-merge-*.png
+
+# playwright MCP scratch
+/.playwright-mcp/
+
+# local-only design reference material (not for the branch)
+/design references/
