@@ -1,6 +1,10 @@
 # Stage 4 — Chat-header dropdown + empty-state polish + tool-result actions
 
-**Status:** 4a **shipped 2026-05-18** (commits `bd4cac6` refactor + `99cbabc` feature). 4b and 4c queued.
+**Status (2026-05-19):**
+- **4a — Chat-header dropdown — shipped** (`bd4cac6` refactor + `99cbabc` feature)
+- **4b — Empty-state recent-conversation cards — shipped** (`61c164a` API snippet + `ba0d48f` UI)
+- **Maintenance fix in flight:** `5a188bf` (idempotent user-message insert on retry)
+- **4c — Tool-result actions — planned, awaiting C1–C5 ratification.** Two-commit plan; no DB migration; no new deps; ~25 unit tests on the serializers.
 
 A self-contained plan doc so a future session can pick up Stage 4 without
 re-deriving anything from conversation history. Companion to `handoff.md`
@@ -338,19 +342,189 @@ or whether a more guided / branded first-run experience earns its keep.
 
 ---
 
-## Stage 4c — Tool-result actions (queued)
+## Stage 4c — Tool-result actions
 
-`Copy as CSV` / `Copy as TSV` / `Copy as markdown` inside
-`ToolCallCard.tsx`. Useful when reps paste P21 query results straight
-into a customer email. Pure clipboard work, no backend change.
+**Status:** planned 2026-05-19, awaiting user ratification of C1–C5
+(see end of this section). Two-commit execution plan; ~25 unit tests;
+no new deps; no DB migration.
 
-To be expanded when we start. Open questions for later: where the copy
-buttons live (top-right of the card? menu like 4a?), what subset of tool
-calls get them (only `viewsQuery`? all?), what counts as "the result"
-for serialization.
+### Deliverable
 
-Files (anticipated): `src/app/chat/ToolCallCard.tsx`,
-`src/lib/clipboard.ts` (new, tiny helper).
+When a tool-call card succeeds and has tabular data, expanding it
+reveals three small pill buttons — **CSV / TSV / MD** — above the
+result table. One click copies the result in that format to the rep's
+clipboard. Reps can paste a P21 query result straight into Excel
+(CSV/TSV), Outlook (MD), or Slack (MD) without re-typing or
+screenshotting.
+
+### Decisions (recommended; awaiting ratification)
+
+| Question | Recommendation | Why |
+|---|---|---|
+| Button location | Expanded body, above the `DetailTable`, right-aligned | Rep has already chosen to look at the data before they need to copy it — collapsed card is for scanning, expanded is for action |
+| Visible when | Only when card is expanded AND tool succeeded AND extractable rows exist | Hide when collapsed (signal-vs-noise), hide on error (no data), hide on non-tabular result |
+| Button style | Text-labeled pills, `text-xs`, charcoal text, `border-charcoal/15` hairline, `hover:bg-brand-sand/40` | Matches DESIGN.md pill vocabulary already used for jump-to-latest / regenerate |
+| Format set | CSV, TSV, Markdown — three buttons, no implicit default | Each has a distinct paste target; no point hiding two behind a menu |
+| Click feedback | Button label flips to "Copied" for 1.5s then reverts | Standard pattern; one focal point per button rather than a global toast |
+| `entityGet` handling | Wrap single object in 1-row array, serialize normally; also surfaces it in the existing DetailTable (small UX upgrade) | Reps occasionally want full customer/part record as one-row CSV; bundling the extension is cheap |
+| `searchCatalog.score` column | Include in copied output | Information the rep can use; trivial to strip on paste if not wanted |
+| Errors / pending / empty result | No buttons shown | Nothing to copy |
+| Clipboard API failure | Silent — button just doesn't flip to "Copied" | Modern browsers grant write access on user gesture; rare failure path doesn't warrant UI |
+| Mobile | Same buttons, same behavior (no hover-required interaction) | Buttons sit in expanded body, always-visible there |
+| Position when table is truncated to 5 of N rows | Buttons copy ALL rows, not just the visible 5 | Reps want the full dataset, not a preview |
+| Markdown front-matter (timestamp, tool name) | Skip — just the table | Rep can prepend context when pasting |
+
+### Visual diff
+
+```
+Today (expanded card):              After 4c (expanded card):
+┌──────────────────────────┐         ┌──────────────────────────┐
+│ ✓ Inventory query     ▲ │         │ ✓ Inventory query     ▲ │
+│   Found 12 rows          │         │   Found 12 rows          │
+├──────────────────────────┤         ├──────────────────────────┤
+│ View   p21_view_inv_mast │         │ View   p21_view_inv_mast │
+│ Filter startswith…       │         │ Filter startswith…       │
+│                          │         │                          │
+│ [table — 5 of 12 rows]   │         │     [CSV] [TSV] [MD]  ← new
+│                          │         │ [table — 5 of 12 rows]   │
+└──────────────────────────┘         └──────────────────────────┘
+```
+
+After clicking a button, its label flips to "Copied" for 1.5s.
+
+### Files
+
+#### Create
+| Path | Purpose | LOC |
+|---|---|---|
+| `src/lib/tool-result-format.ts` | `toCsv(rows)`, `toTsv(rows)`, `toMarkdown(rows)` + cell-format + header-collection helpers | ~80 |
+| `src/lib/__tests__/tool-result-format.test.ts` | ~25 unit tests on escape rules, empty arrays, mixed-shape rows, null/Date/nested-object cells | ~120 |
+
+#### Modify
+| Path | What changes |
+|---|---|
+| `src/components/chat/ToolCallCard.tsx` | Extend `extractRows` to wrap `entityGet`'s single-object output in a 1-row array; add `CopyRow` + `CopyButton` internal components; render `<CopyRow rows={rows} />` above `<DetailTable>` in the expanded conditional |
+
+#### Don't touch
+- API routes, tool definitions (`src/lib/ai/tools.ts`), chat route — copy is pure client-side
+- DB schema — no migration
+- `ResultsTable.tsx` — visual table renderer is fine as-is
+- 4a's `ChatHeader.tsx` / 4b's `RecentChatsGrid.tsx` — orthogonal
+
+### Serializer details
+
+**Header collection.** First row's keys = canonical order; later rows' new keys appended in first-seen order. Stable + intuitive.
+
+**Cell formatting.** Strings passthrough; numbers/booleans via `String(value)`; null/undefined → empty; Date → `.toISOString()`; nested objects/arrays → compact `JSON.stringify`.
+
+**Escape rules.**
+- **CSV (RFC 4180):** if cell contains `,` `"` `\n` or `\r`, wrap in `"…"` and double internal `"`
+- **TSV (Excel-paste):** collapse tabs/CR/LF inside cells to a single space (no quoting; tabs would break columns)
+- **Markdown (GFM):** escape pipes as `\|`; collapse CR/LF to a single space (newlines break the row)
+
+**Empty array.** All three serializers return `""`. The gate in `ToolCallCard` (`rows.length > 0`) prevents an empty button row anyway; serializers handle it defensively.
+
+### Component shape
+
+`CopyRow` (internal to `ToolCallCard.tsx`):
+
+```tsx
+function CopyRow({ rows }: { rows: Row[] }) {
+  return (
+    <div className="mt-3 flex justify-end gap-1.5">
+      <CopyButton label="CSV" build={() => toCsv(rows)} />
+      <CopyButton label="TSV" build={() => toTsv(rows)} />
+      <CopyButton label="MD"  build={() => toMarkdown(rows)} />
+    </div>
+  );
+}
+```
+
+`CopyButton` carries its own `copied` state, 1.5s timeout, and an `aria-label` (verbose form so screen readers don't read "MD" as a meaningless abbreviation). `build` is a thunk so we don't run all three serializers eagerly on every render. Button has a `min-w-[3.5rem]` so the row doesn't reflow when the label flips to "Copied".
+
+### Result-shape extraction
+
+Extend `extractRows` to also wrap `entityGet`'s single-object output:
+
+```ts
+function extractRows(output: unknown): Row[] | null {
+  if (!output || typeof output !== "object") return null;
+  if ("error" in output) return null;
+  if ("rows" in output && Array.isArray((output as { rows?: unknown }).rows)) {
+    return (output as { rows: Row[] }).rows.filter(isPlainObject);
+  }
+  if ("matches" in output && Array.isArray((output as { matches?: unknown }).matches)) {
+    return (output as { matches: Row[] }).matches.filter(isPlainObject);
+  }
+  // entityGet returns a single record; wrap it.
+  if (!Array.isArray(output) && Object.keys(output).length > 0) {
+    return [output as Row];
+  }
+  return null;
+}
+```
+
+Side benefit: the existing `DetailTable` will now render `entityGet` results as a 1-row table (today they don't render at all). Small UX upgrade bundled in.
+
+### Edge cases
+
+| Case | Behavior |
+|---|---|
+| Tool still streaming | No buttons (state !== "success") |
+| Tool errored | No buttons |
+| Result `{ rows: [] }` | No buttons (rows.length === 0) |
+| Result `{ rows: [...one row...] }` | Buttons present; serializers emit 1-row output |
+| `entityGet` succeeded | Wrapped → 1-row table + buttons |
+| Cell contains `,` `"` `\n` `\|` | Format-specific escape rules apply |
+| Cell is `null` / `undefined` / Date / nested object | Cell-formatter handles each |
+| Rows have inconsistent keys | Headers are union (first-row order, then new-key insertion order); missing cells empty |
+| Very large result (>1000 rows) | Clipboard handles up to ~10 MB; comfortably under that |
+| Clipboard permission denied | Silent — button doesn't flip to "Copied" |
+| User collapses card mid-"Copied" state | Component unmounts; state gone; harmless |
+
+### Dependencies
+
+**No new npm packages.** Hand-rolled serializers; native `navigator.clipboard`; existing Tailwind tokens.
+
+### Commit plan
+
+1. **`feat(chat): tool-result format serializers`** — `tool-result-format.ts` + ~25 unit tests. No UI shift; nothing imports it yet.
+2. **`feat(chat): copy CSV/TSV/markdown buttons on tool-result cards`** — `ToolCallCard.tsx` extension + browser smoke.
+
+### Testing
+
+#### Vitest (added, ~25 tests)
+- CSV: simple table, comma in cell (quote-wrap), embedded `"` (doubled), newline in cell (quote-wrap), null/undefined → empty, Date → ISO, nested object → JSON.stringify, empty array → "", mixed-shape rows → union headers
+- TSV: tab/newline in cells → space; otherwise CSV-like coverage
+- Markdown: 3-row table renders with header divider, pipe escape, newline collapse, empty array → ""
+- Helpers: `collectHeaders` (insertion-order union), `formatCell` (per-type expected output)
+
+#### Vitest (regression)
+- All current tests pass after the `extractRows` extension
+
+#### Browser smoke (local, no Vercel preview)
+1. `viewsQuery` returning multiple rows → expand → CSV/TSV/MD buttons appear above the table
+2. CSV → paste into Excel → columns split, commas inside cells (e.g., addresses) stay intact
+3. TSV → paste into Excel → same column structure; numbers preserve format
+4. MD → paste into markdown preview / Slack / VS Code → renders as table with header divider
+5. `entityGet` → expand → buttons present → copy → single-row table
+6. Force tool error → expand → no buttons
+7. Mid-stream → no buttons
+8. Two-button quick clicks → both work; independent "Copied" states
+9. Collapse card → buttons gone
+10. Mobile breakpoint → buttons visible, tap works
+
+### Open questions (C1–C5 — awaiting user ratification)
+
+**C1.** Buttons in collapsed card too, or expanded-only? — recommend **expanded-only**.
+
+**C2.** Position above the table — right-aligned, left-aligned, or centered? — recommend **right-aligned**.
+
+**C3.** Markdown front-matter (one-line `<!-- tool — date -->` at top of MD copy)? — recommend **skip; minimal output**.
+
+**C4.** "Download as CSV" option for large results? — recommend **skip for v1; clipboard handles up to ~10 MB**.
+
+**C5.** Bundle the `entityGet → 1-row table` extension into commit 2, or split first? — recommend **bundle; copy buttons need the extension anyway, and a 1-row table is a UX win worth landing together**.
 
 ---
 
