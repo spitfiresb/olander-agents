@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { labelForToolPart } from "@/lib/ai/tool-labels";
+import { toCsv, toMarkdown, toTsv } from "@/lib/tool-result-format";
 import { ResultsTable, type Column, inferFormat } from "./ResultsTable";
 
 export type ToolPartLike = {
@@ -79,6 +80,7 @@ export function ToolCallCard({ part }: { part: ToolPartLike }) {
           />
           {rows && rows.length > 0 && (
             <div className="mt-3">
+              {state === "success" && <CopyRow rows={rows} />}
               <DetailTable rows={rows} />
             </div>
           )}
@@ -229,7 +231,12 @@ function countOf(output: unknown): number | null {
 }
 
 function extractRows(output: unknown): Record<string, unknown>[] | null {
-  if (output && typeof output === "object" && "rows" in output) {
+  if (!output || typeof output !== "object") return null;
+  // Error envelope from the proxy or search path — never treat as data,
+  // regardless of any other keys that might be present alongside.
+  if ("error" in output) return null;
+
+  if ("rows" in output) {
     const r = (output as { rows?: unknown }).rows;
     if (Array.isArray(r)) {
       return r.filter(
@@ -240,7 +247,7 @@ function extractRows(output: unknown): Record<string, unknown>[] | null {
   }
   // searchCatalog returns { matches: [...] } rather than { rows }. Surface
   // the candidate list in the same expandable table the other tools use.
-  if (output && typeof output === "object" && "matches" in output) {
+  if ("matches" in output) {
     const m = (output as { matches?: unknown }).matches;
     if (Array.isArray(m)) {
       return m.filter(
@@ -249,7 +256,59 @@ function extractRows(output: unknown): Record<string, unknown>[] | null {
       );
     }
   }
+  // entityGet returns a single record — no `rows`/`matches` wrapper. Wrap
+  // it in a 1-row array so the same downstream code path (DetailTable +
+  // copy buttons) works for it. Side benefit: entityGet results now
+  // render in the expanded card's table where they didn't before 4c.
+  if (!Array.isArray(output) && Object.keys(output as object).length > 0) {
+    return [output as Record<string, unknown>];
+  }
   return null;
+}
+
+// Stage 4c — right-aligned pill row above the result table. Three small
+// buttons (CSV / TSV / MD) → one click copies the result in that format
+// to the rep's clipboard. Brief "Copied" state for 1.5s, then revert.
+// Only renders when the parent already gated on rows.length > 0 AND
+// state === "success" (so error/pending paths can't surface a button
+// that would copy stale or empty content).
+function CopyRow({ rows }: { rows: Record<string, unknown>[] }) {
+  return (
+    <div className="mb-2 flex justify-end gap-1.5">
+      <CopyButton label="CSV" build={() => toCsv(rows)} />
+      <CopyButton label="TSV" build={() => toTsv(rows)} />
+      <CopyButton label="MD" build={() => toMarkdown(rows)} />
+    </div>
+  );
+}
+
+function CopyButton({
+  label,
+  build,
+}: {
+  label: string;
+  build: () => string;
+}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(build());
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        } catch {
+          // Modern browsers grant clipboard write on user gesture; the
+          // rare failure path doesn't warrant any UI signal.
+        }
+      }}
+      aria-label={`Copy as ${label}`}
+      className="min-w-[3.5rem] rounded-full border border-brand-charcoal/15 bg-white px-2.5 py-0.5 text-xs text-brand-charcoal transition-colors hover:border-brand-charcoal/30 hover:bg-brand-sand/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2 focus-visible:ring-offset-brand-canvas"
+    >
+      {copied ? "Copied" : label}
+    </button>
+  );
 }
 
 // Output may carry a proxy error envelope; surface only the symbolic code,
