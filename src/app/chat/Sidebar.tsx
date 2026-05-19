@@ -246,7 +246,7 @@ function ConversationRow({
       <Link
         href={`/chat/${row.id}`}
         onClick={onRowSelect}
-        className={`flex min-w-0 flex-1 items-center gap-1.5 truncate rounded-md py-1.5 pl-2 pr-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal ${
+        className={`flex min-w-0 flex-1 items-center gap-1.5 truncate rounded-md py-1.5 pl-2 pr-20 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-charcoal ${
           isActive
             ? "bg-white/10 text-white"
             : "text-white/70 hover:bg-white/5 hover:text-white"
