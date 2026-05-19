@@ -257,18 +257,84 @@ Tailwind tokens.
 
 ---
 
-## Stage 4b — Empty-state polish (queued)
+## Stage 4b — Empty-state polish
 
-Replace the bare "Ask about a customer, item, or order…" placeholder
-with personalized recent-conversation cards. Clicking a card opens the
-chat.
+**Status:** shipped 2026-05-19. Commits `61c164a` (API snippet) + `ba0d48f` (UI).
 
-To be expanded when we start. Open questions for later: how many cards
-(3? 6?), what each card surfaces (last message? title only?), keyboard
-nav (arrow keys?), how it behaves for a brand-new user with zero history.
+### Deliverable
 
-Files (anticipated): `src/app/chat/EmptyState.tsx` (new),
-`src/app/chat/ChatShell.tsx` (empty branch swap).
+Returning rep on `/chat` sees their **six most-recent chats as cards**
+(title + first-question snippet + relative time + pin glyph if pinned)
+above the existing suggestion chips. Clicking a card resumes. New users
+with zero history see the existing cold-start view unchanged.
+
+### Decisions (locked)
+
+| Question | Answer | Reason |
+|---|---|---|
+| Card count | 6 (2 cols × 3 rows on `sm+`) | A day's worth of recent work without scrolling on most laptops |
+| Snippet content | First user-message text, LEFT 220 chars server-side, CSS line-clamp-2 client-side | It's the *question* — what reps need to recognize. Stable across the chat's life. |
+| Section header above cards | Small uppercase `RECENT` label (matches sidebar group caption style) | Already in the design vocabulary |
+| Suggestion chips when history exists | Kept below the cards under a small `Or try` label | Frames the chips as a secondary fallback rather than a competing surface |
+| Cold-start view (zero history) | Untouched from pre-4b | New-user UX is on-brand; clutter not earned. Polish note carried into Stage 5 — see "Cold-start polish" below |
+| Card order | Pinned first, then `updatedAt` desc | Same as sidebar — one ordering across all surfaces |
+| Pin glyph on card | Yes, top-right corner when pinned (filled glyph) | Same signal as the sidebar's pinned rows |
+| Click target | Full card is one `<Link href="/chat/{id}">` | Native browser semantics; middle-click opens a new tab |
+| Relative time format | "just now" / "X min ago" / "X hr ago" / "Yesterday" / "X days ago" / "MMM D" / "MMM YYYY" beyond a year | Reads like a person talks; absolute dates after a week |
+| Snippet missing (attachment-only first message) | Skip the snippet line; title + time render alone | Sparse is fine, no placeholder needed |
+| Locale | en-US pinned | Olander reps are English-speaking; avoids SSR/CSR hydration mismatches |
+| New deps | None | Hand-rolled relative-time helper; native Intl.DateTimeFormat |
+
+### Files
+
+#### Created
+| Path | Purpose |
+|---|---|
+| `src/lib/relative-time.ts` | `formatRelativeTime(iso, now?)` — pure function with injectable clock for testability |
+| `src/lib/__tests__/relative-time.test.ts` | 8 tests covering every bucket boundary + future-timestamp clamp |
+| `src/app/chat/RecentChatsGrid.tsx` | Grid + card component; consumes `ConversationSummary[]`; slices to `limit` (default 6) |
+
+#### Modified
+| Path | What changed |
+|---|---|
+| `src/lib/conversations.ts` | `listConversations` and `searchConversations` now select an extra `snippet` column via a correlated subquery on the oldest non-superseded user message's `searchText`, capped `LEFT 220` |
+| `src/app/chat/Sidebar.tsx` | `ConversationSummary` type widened with `snippet: string \| null` — sidebar doesn't render it, just propagates |
+| `src/app/chat/EmptyState.tsx` | Split into `ColdStartView` (today's exact JSX) + `WarmStartView` (logo + RECENT label + grid + "Or try" label + chips). Branch on `conversations.length === 0` |
+| `src/app/chat/MessageList.tsx` | Accepts `conversations: ConversationSummary[]`; forwards to `<EmptyState>` |
+| `src/app/chat/ChatShell.tsx` | Passes `conversations={conversations}` into `<MessageList />` |
+
+### Behavioral diff (what changes for the rep)
+
+| Scenario | Before | After |
+|---|---|---|
+| Resume yesterday's lookup | Open sidebar → scroll → click | One card-click on the main surface |
+| Brand-new rep | Logo + 4 chips | Identical (unchanged) |
+| Mobile rep | Hamburger → drawer → scroll → tap | Three cards visible above the fold |
+
+### Edge cases handled
+
+| Case | Behavior |
+|---|---|
+| `conversations` empty during initial fetch | ColdStartView renders briefly until refresh completes; minor visual flicker, accepted for v1 |
+| Conversation with only attachments | Snippet line collapses; title + time only |
+| Future timestamp (clock skew) | Clamped to "just now" |
+| Long title / snippet | Truncate at single line / `line-clamp-2` |
+| Pinned chat from a month ago | Floats to top with pin glyph; relative time still honest ("May 12") |
+
+### Testing
+
+- 8 new tests on `formatRelativeTime` (bucket boundaries, future timestamps)
+- All existing tests still pass (108 total, up from 100 after Stage 4a)
+- Browser smoke checklist: new chat → cards visible; pin → glyph appears + card reorders; long title truncates; mobile narrows to single column; click → resumes
+
+### Carry-forward note: Cold-start polish (Stage 5)
+
+User flagged 2026-05-19 that the cold-start view "could be improved"
+but agreed to defer alongside other Stage 5 chrome polish. When
+revisiting: consider whether the "How can I help today?" greeting +
+generic suggestion chips is the right onboarding for a first-time rep,
+or whether a more guided / branded first-run experience earns its keep.
+**Out of 4b scope; do not touch in 4b.**
 
 ---
 
