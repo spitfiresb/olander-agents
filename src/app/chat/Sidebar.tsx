@@ -3,10 +3,7 @@
 import Link from "next/link";
 import {
   type ChangeEvent,
-  type FormEvent,
   type KeyboardEvent,
-  useEffect,
-  useRef,
   useState,
 } from "react";
 import {
@@ -15,8 +12,10 @@ import {
   PinIcon,
   PlusIcon,
   SearchIcon,
+  TrashIcon,
 } from "@/components/icons";
 import { Wordmark } from "@/components/Wordmark";
+import { RenameInput } from "./RenameInput";
 
 export type ConversationSummary = {
   id: string;
@@ -297,89 +296,6 @@ function ConversationRow({
         )}
       </div>
     </li>
-  );
-}
-
-function RenameInput({
-  initial,
-  onCommit,
-  onCancel,
-}: {
-  initial: string;
-  onCommit: (next: string) => Promise<void> | void;
-  onCancel: () => void;
-}) {
-  const [value, setValue] = useState(initial);
-  const [saving, setSaving] = useState(false);
-  const ref = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    // Auto-focus + select-all when entering edit mode so typing replaces the
-    // existing title cleanly. setState-in-effect is intentional via ref-focus.
-    const el = ref.current;
-    if (!el) return;
-    el.focus();
-    el.select();
-  }, []);
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (saving) return;
-    setSaving(true);
-    try {
-      await onCommit(value);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <form onSubmit={submit} className="block">
-      <input
-        ref={ref}
-        type="text"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            e.preventDefault();
-            onCancel();
-          }
-        }}
-        onBlur={() => {
-          // Treat blur as commit-on-change, cancel-on-no-change so a
-          // distracted user doesn't lose their edit by clicking away.
-          if (value.trim() && value !== initial) {
-            void onCommit(value);
-          } else {
-            onCancel();
-          }
-        }}
-        disabled={saving}
-        maxLength={120}
-        className="block w-full rounded-md border border-white/40 bg-white/10 py-1.5 pl-2 pr-2 text-sm text-white outline-none focus:border-white/60 disabled:opacity-50"
-      />
-    </form>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      width="12"
-      height="12"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M3 4h10" />
-      <path d="M5 4V2.5A.5.5 0 0 1 5.5 2h5a.5.5 0 0 1 .5.5V4" />
-      <path d="M4 4l1 9.5a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1L12 4" />
-    </svg>
   );
 }
 

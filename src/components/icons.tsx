@@ -315,3 +315,71 @@ export function AlertIcon({ className }: { className?: string } = {}) {
     </svg>
   );
 }
+
+// Trash glyph — three-line lid with a curved bin. Lifted from Sidebar.tsx
+// so the chat-header dropdown can use the same icon. Stroke-based to match
+// the sidebar/composer vocabulary.
+export function TrashIcon({ className }: { className?: string } = {}) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="12"
+      height="12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M3 4h10" />
+      <path d="M5 4V2.5A.5.5 0 0 1 5.5 2h5a.5.5 0 0 1 .5.5V4" />
+      <path d="M4 4l1 9.5a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1L12 4" />
+    </svg>
+  );
+}
+
+// Caret-down for menu triggers. The chat-header dropdown rotates it 180°
+// when the menu is open as a subtle state-change affordance.
+export function ChevronDownIcon({ className }: { className?: string } = {}) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="12"
+      height="12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M3.5 6L8 10.5 12.5 6" />
+    </svg>
+  );
+}
+
+// Down-arrow into a tray — "save to disk." Used on the Export as markdown
+// menu item in the chat-header dropdown.
+export function DownloadIcon({ className }: { className?: string } = {}) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M8 2v8" />
+      <path d="M4.5 7.5L8 11l3.5-3.5" />
+      <path d="M2.5 13.5h11" />
+    </svg>
+  );
+}
