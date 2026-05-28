@@ -158,6 +158,7 @@ To get the password without copy-pasting from someone else:
 - **Sign-in produces three rows.** A successful Entra sign-in writes one row each to `user`, `account`, and `session`. If you see fewer, the adapter wiring is broken — start from `src/auth.ts`.
 - **Drizzle's own table.** `neondb.drizzle.__drizzle_migrations` tracks which migrations have been applied. Don't touch it manually unless you know what you're doing.
 - **Auth.js requires the database session strategy** (configured in `src/auth.ts`) for the Drizzle adapter to populate the `session` table. JWT-strategy sessions skip the DB entirely — switching strategies would break our user-tier model unless the role is duplicated into the JWT.
+- **Drizzle correlated-subquery gotcha.** Inside a correlated subquery in a SELECT clause, Drizzle's `${table.column}` interpolation emits the column unqualified — Postgres then resolves it to the *subquery's* own scope (if it has a same-named column) and the correlation silently refers to itself. Result: the subquery returns no rows and the outer column comes back NULL. Workaround: use literal SQL strings for the cross-scope reference (e.g. `"conversation"."id"` instead of `${conversations.id}`); the `${messages}` table-interpolation form is fine. First hit in commit `f84894d` (`firstUserSnippetSql` in `src/lib/conversations.ts`, since removed). Keep this in mind any time you write a correlated subquery referencing an outer-query column.
 
 ## Quick reference
 

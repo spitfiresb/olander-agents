@@ -8,17 +8,12 @@ import { summarizeToolUsageForCitation } from "@/lib/ai/tool-labels";
 import { EditableUserBubble } from "./EditableUserBubble";
 import { EmptyState } from "./EmptyState";
 import { FollowUpChips } from "./FollowUpChips";
-import type { ConversationSummary } from "./Sidebar";
 
 const STUCK_THRESHOLD_PX = 80;
 
 type Props = {
   messages: UIMessage[];
   status: ChatStatus;
-  // Forwarded to EmptyState so the warm-start view can render recent-chat
-  // cards. Empty array on initial load (before refreshConversations) is
-  // fine — EmptyState falls back to the cold-start view until populated.
-  conversations: ConversationSummary[];
   onRegenerate: () => void;
   onSelectSuggestion: (text: string) => void;
   onSelectFollowUp: (prompt: string) => void;
@@ -28,7 +23,6 @@ type Props = {
 export function MessageList({
   messages,
   status,
-  conversations,
   onRegenerate,
   onSelectSuggestion,
   onSelectFollowUp,
@@ -76,10 +70,7 @@ export function MessageList({
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-8 sm:px-6 lg:py-10">
         <div className="mx-auto flex max-w-3xl flex-col gap-8">
           {isEmpty ? (
-            <EmptyState
-              onSelectSuggestion={onSelectSuggestion}
-              conversations={conversations}
-            />
+            <EmptyState onSelectSuggestion={onSelectSuggestion} />
           ) : (
             messages.map((m, i) => {
               if (m.role === "user") {

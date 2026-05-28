@@ -1,48 +1,58 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Logo } from "@/components/Logo";
-import { RecentChatsGrid } from "./RecentChatsGrid";
-import type { ConversationSummary } from "./Sidebar";
 
-const SUGGESTIONS = [
+// Curated suggestion pool. Every entry was audited against live P21 data
+// via the droplet proxy + Qdrant catalog: each one returns a substantive,
+// demo-worthy result today. Specific choices that took data to settle:
+//   - "31C100SHCS" (5/16-18 X 1 SOC CAP SST) — has multi-warehouse stock
+//     (2,265 at HQ + 183 elsewhere), so "across all warehouses" actually
+//     shows a spread. PN12345-01 from the system-prompt examples comes back
+//     0 everywhere and reads as a dead demo.
+//   - "last 30 days" and "last 6 months" windows instead of "today" /
+//     "this month" — P21's most-recent activity in our test dataset trails
+//     the calendar by 1-2 weeks; narrower windows risked 0-row results.
+//
+// No aggregation-only prompts (the viewsQuery tool has no $apply/groupby).
+// No price-bearing prompts (the `pricing` scope is opt-in for non-admins).
+const SUGGESTION_POOL = [
   "What size helicoil goes in a 3/8-16 hole?",
   "Do we have any M10 1.25 socket head cap screws in stock?",
-  "Stainless customers who haven't ordered in 90 days",
+  "What parts do we stock the most of?",
   "Who carries bronze cap screws?",
-];
+  "On-hand for 31C100SHCS across all warehouses",
+  "Find a 5/16-18 stainless flange nut",
+  "Stock check on 1/4-20 stainless lock nuts",
+  "Open sales orders shipping this week",
+  "Open POs landing in the next 14 days",
+  "Past-due invoices from the last 6 months",
+  "Open sales orders from the last 30 days",
+  "Customers added in the last 30 days",
+] as const;
+
+const VISIBLE_COUNT = 4;
 
 type Props = {
   onSelectSuggestion: (text: string) => void;
-  conversations: ConversationSummary[];
 };
 
-// Two surfaces, one component. New-user (zero history) keeps today's
-// onboarding view verbatim — logo + greeting + four suggestion chips —
-// because the cold-start path is on-brand and we haven't earned the
-// right to clutter it yet. Returning rep gets the warm-start view:
-// six most-recent chats as cards above, suggestion chips as a fallback
-// below. Branch happens on a single conversations.length check.
-//
-// Cold-start polish is on the Stage 5 list — flagged 2026-05-19 as
-// "could be improved" but not part of 4b scope; revisit alongside
-// other chrome polish.
-export function EmptyState({ onSelectSuggestion, conversations }: Props) {
-  if (conversations.length === 0) {
-    return <ColdStartView onSelectSuggestion={onSelectSuggestion} />;
-  }
-  return (
-    <WarmStartView
-      conversations={conversations}
-      onSelectSuggestion={onSelectSuggestion}
-    />
+// One surface: logo + greeting + four suggestion chips. The earlier
+// warm-start variant (recent-chat cards + Or-try chips) was pulled —
+// the sidebar already covers chat history, so the cards just doubled
+// the same titles and pushed the greeting off-screen.
+export function EmptyState({ onSelectSuggestion }: Props) {
+  // SSR-safe rotation: render a deterministic prefix on first paint so
+  // server HTML matches client hydration, then shuffle on mount. Math.random
+  // in the lazy initializer would diverge between server and client and
+  // throw a hydration warning.
+  const [suggestions, setSuggestions] = useState<readonly string[]>(() =>
+    SUGGESTION_POOL.slice(0, VISIBLE_COUNT),
   );
-}
+  useEffect(() => {
+    setSuggestions(pickRandom(SUGGESTION_POOL, VISIBLE_COUNT));
+  }, []);
 
-function ColdStartView({
-  onSelectSuggestion,
-}: {
-  onSelectSuggestion: (text: string) => void;
-}) {
   return (
     <div className="flex flex-col items-center pb-8 pt-12 text-center sm:pt-20">
       <Logo size="md" />
@@ -53,7 +63,7 @@ function ColdStartView({
         Ask about customers, inventory, or open orders.
       </p>
       <div className="mt-8 grid w-full max-w-xl grid-cols-1 gap-2 sm:grid-cols-2">
-        {SUGGESTIONS.map((text) => (
+        {suggestions.map((text) => (
           <SuggestionButton
             key={text}
             text={text}
@@ -61,42 +71,6 @@ function ColdStartView({
           />
         ))}
       </div>
-    </div>
-  );
-}
-
-function WarmStartView({
-  conversations,
-  onSelectSuggestion,
-}: {
-  conversations: ConversationSummary[];
-  onSelectSuggestion: (text: string) => void;
-}) {
-  return (
-    <div className="pb-8 pt-8 sm:pt-12">
-      <div className="flex justify-center">
-        <Logo size="md" />
-      </div>
-      <section className="mt-8">
-        <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-brand-ink-soft">
-          Recent
-        </h3>
-        <RecentChatsGrid conversations={conversations} />
-      </section>
-      <section className="mt-8">
-        <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-brand-ink-soft">
-          Or try
-        </h3>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {SUGGESTIONS.map((text) => (
-            <SuggestionButton
-              key={text}
-              text={text}
-              onSelect={onSelectSuggestion}
-            />
-          ))}
-        </div>
-      </section>
     </div>
   );
 }
@@ -117,4 +91,13 @@ function SuggestionButton({
       {text}
     </button>
   );
+}
+
+function pickRandom<T>(arr: readonly T[], n: number): T[] {
+  const out = arr.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out.slice(0, n);
 }
