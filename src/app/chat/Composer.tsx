@@ -1,14 +1,61 @@
 "use client";
 
-import { type FormEvent, type KeyboardEvent } from "react";
+import {
+  type ChangeEvent,
+  type ClipboardEvent,
+  type Dispatch,
+  type FormEvent,
+  type KeyboardEvent,
+  type SetStateAction,
+  useRef,
+} from "react";
 import type { ChatStatus } from "ai";
+import { CameraIcon, MicIcon, PaperclipIcon } from "@/components/icons";
+import { useSpeechRecognition } from "@/lib/voice/useSpeechRecognition";
+import { AttachmentChip } from "./AttachmentChip";
+
+// Client-side state for a single attachment chip. Lives in ChatShell because
+// the drop overlay (also in ChatShell) is another entry point; the composer
+// just renders the chips and provides the button/paste affordances.
+export type ComposerAttachment = {
+  id: string;
+  filename: string;
+  mediaType: string;
+  size: number;
+  status: "uploading" | "ready" | "error";
+  url?: string;
+  pathname?: string;
+  errorMessage?: string;
+};
+
+// Mirror of src/lib/blob.ts ALLOWED_MIME — duplicated here so the file input
+// `accept` attribute filters at the OS picker level, and so the paste/drop
+// paths can pre-reject before the network call. Server is still the
+// authoritative validator (TESTING.md §2).
+const ACCEPT_MIME = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+  "text/plain",
+  "text/csv",
+  "text/tab-separated-values",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+].join(",");
 
 type Props = {
   input: string;
-  setInput: (value: string) => void;
+  // Accept the functional-updater form so the speech hook can append to the
+  // latest input without racing the React render cycle.
+  setInput: Dispatch<SetStateAction<string>>;
   status: ChatStatus;
   error: Error | undefined;
-  onSubmit: (text: string) => void;
+  attachments: ComposerAttachment[];
+  onAddFiles: (files: FileList | File[]) => void;
+  onRemoveAttachment: (id: string) => void;
+  onSubmit: () => void;
   onStop: () => void;
   onRegenerate: () => void;
 };
@@ -25,6 +72,8 @@ function friendlyErrorMessage(error: Error): string {
     return "AI service is temporarily unavailable. Try again shortly.";
   if (msg.includes("bad_request"))
     return "Couldn't send your message. Please refresh and try again.";
+  if (msg.includes("forbidden"))
+    return "That attachment isn't valid for your account. Please re-upload.";
   return "Something went wrong. Please try again.";
 }
 
@@ -33,18 +82,50 @@ export function Composer({
   setInput,
   status,
   error,
+  attachments,
+  onAddFiles,
+  onRemoveAttachment,
   onSubmit,
   onStop,
   onRegenerate,
 }: Props) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  // Voice input — single-utterance Web Speech. Final transcripts append to
+  // input via the functional updater so a mid-listen edit by the user isn't
+  // clobbered. The hook self-detects support and exposes `supported=false`
+  // on Firefox / unsupported browsers, which hides the button entirely.
+  const speech = useSpeechRecognition({
+    onFinalTranscript: (text) => {
+      setInput((prev) =>
+        prev.length > 0 && !/\s$/.test(prev) ? `${prev} ${text}` : `${prev}${text}`,
+      );
+    },
+  });
+
   const trimmed = input.trim();
-  const canSend = status === "ready" && trimmed.length > 0;
+  const readyCount = attachments.filter((a) => a.status === "ready").length;
+  const stillUploading = attachments.some((a) => a.status === "uploading");
+  const canSend =
+    status === "ready" &&
+    !stillUploading &&
+    (trimmed.length > 0 || readyCount > 0);
   const inFlight = status === "submitted" || status === "streaming";
 
   const submit = () => {
     if (!canSend) return;
-    onSubmit(trimmed);
-    setInput("");
+    // Finalize any in-flight transcript before submit; onresult fires before
+    // onend, so a pending phrase still lands in `input` and the message will
+    // include it on the next render. If it doesn't land in time, the user
+    // sees a trailing fragment in the empty composer — acceptable.
+    if (speech.listening) speech.stop();
+    onSubmit();
+  };
+
+  const toggleMic = () => {
+    if (speech.listening) speech.stop();
+    else speech.start();
   };
 
   const handleSubmit = (e: FormEvent) => {
@@ -57,6 +138,21 @@ export function Composer({
       e.preventDefault();
       submit();
     }
+  };
+
+  const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (e.clipboardData.files.length > 0) {
+      e.preventDefault();
+      onAddFiles(e.clipboardData.files);
+    }
+  };
+
+  const handleFileInputChange = (e: ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      onAddFiles(e.target.files);
+    }
+    // Reset so picking the same file twice still fires `change`.
+    e.target.value = "";
   };
 
   return (
@@ -77,39 +173,115 @@ export function Composer({
             </button>
           </div>
         )}
+        {speech.error && (
+          <div className="mb-2 rounded-lg border border-brand-charcoal/15 bg-white px-4 py-2 text-xs text-brand-ink-soft">
+            {speech.error === "mic_blocked"
+              ? "Microphone access blocked — check your browser permissions."
+              : "Voice input failed. Please try again."}
+          </div>
+        )}
         <form
           onSubmit={handleSubmit}
-          className="flex items-end gap-2 rounded-2xl border border-brand-charcoal/15 bg-white p-2 shadow-[0_-4px_16px_-12px_rgba(45,46,41,0.15)] transition-colors focus-within:border-brand-red/40 focus-within:ring-1 focus-within:ring-brand-red/20"
+          className="flex flex-col gap-2 rounded-2xl border border-brand-charcoal/15 bg-white p-2 shadow-[0_-4px_16px_-12px_rgba(45,46,41,0.15)] transition-colors focus-within:border-brand-red/40 focus-within:ring-1 focus-within:ring-brand-red/20"
         >
-          <textarea
-            data-composer-input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask about a customer, item, or order…"
-            rows={1}
-            className="max-h-32 min-h-9 flex-1 resize-none border-none bg-transparent px-2 py-2 text-sm leading-relaxed text-brand-charcoal placeholder:text-brand-ink-soft/70 focus:outline-none [field-sizing:content]"
-          />
-          {inFlight ? (
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 border-b border-brand-charcoal/10 px-1 pb-2">
+              {attachments.map((a) => (
+                <AttachmentChip
+                  key={a.id}
+                  filename={a.filename}
+                  mediaType={a.mediaType}
+                  size={a.size}
+                  url={a.url}
+                  variant="composer"
+                  status={a.status}
+                  errorMessage={a.errorMessage}
+                  onRemove={() => onRemoveAttachment(a.id)}
+                />
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-1">
             <button
               type="button"
-              onClick={onStop}
-              aria-label="Stop generating"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-brand-charcoal/30 bg-white text-brand-charcoal transition-colors hover:bg-brand-sand/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2"
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Attach files"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-brand-ink-soft transition-colors hover:bg-brand-sand/40 hover:text-brand-charcoal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2"
             >
-              <StopIcon />
+              <PaperclipIcon />
             </button>
-          ) : (
+            {speech.supported && (
+              <button
+                type="button"
+                onClick={toggleMic}
+                aria-label={speech.listening ? "Stop voice input" : "Start voice input"}
+                aria-pressed={speech.listening}
+                className={
+                  speech.listening
+                    ? "flex h-10 w-10 shrink-0 animate-pulse items-center justify-center rounded-full bg-brand-red/10 text-brand-red transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2"
+                    : "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-brand-ink-soft transition-colors hover:bg-brand-sand/40 hover:text-brand-charcoal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2"
+                }
+              >
+                <MicIcon />
+              </button>
+            )}
             <button
-              type="submit"
-              disabled={!canSend}
-              aria-label="Send message"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-red text-white transition-colors hover:bg-brand-red/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+              type="button"
+              onClick={() => cameraInputRef.current?.click()}
+              aria-label="Take a photo"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-brand-ink-soft transition-colors hover:bg-brand-sand/40 hover:text-brand-charcoal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2 lg:hidden"
             >
-              <ArrowUpIcon />
+              <CameraIcon />
             </button>
-          )}
+            <textarea
+              data-composer-input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              placeholder="Ask about a customer, item, or order…"
+              rows={1}
+              className="max-h-32 min-h-9 flex-1 resize-none border-none bg-transparent px-2 py-2 text-sm leading-relaxed text-brand-charcoal placeholder:text-brand-ink-soft/70 focus:outline-none [field-sizing:content]"
+            />
+            {inFlight ? (
+              <button
+                type="button"
+                onClick={onStop}
+                aria-label="Stop generating"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-brand-charcoal/30 bg-white text-brand-charcoal transition-colors hover:bg-brand-sand/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2"
+              >
+                <StopIcon />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!canSend}
+                aria-label="Send message"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-red text-white transition-colors hover:bg-brand-red/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ArrowUpIcon />
+              </button>
+            )}
+          </div>
         </form>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={ACCEPT_MIME}
+          onChange={handleFileInputChange}
+          className="hidden"
+          tabIndex={-1}
+        />
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleFileInputChange}
+          className="hidden"
+          tabIndex={-1}
+        />
       </div>
     </div>
   );

@@ -5,18 +5,35 @@ import type { ChatStatus, UIMessage } from "ai";
 import { AssistantContent } from "@/components/chat/AssistantContent";
 import { isToolPart, ToolCallCard, type ToolPartLike } from "@/components/chat/ToolCallCard";
 import { summarizeToolUsageForCitation } from "@/lib/ai/tool-labels";
+import { EditableUserBubble } from "./EditableUserBubble";
 import { EmptyState } from "./EmptyState";
+import { FollowUpChips } from "./FollowUpChips";
+import type { ConversationSummary } from "./Sidebar";
 
 const STUCK_THRESHOLD_PX = 80;
 
 type Props = {
   messages: UIMessage[];
   status: ChatStatus;
+  // Forwarded to EmptyState so the warm-start view can render recent-chat
+  // cards. Empty array on initial load (before refreshConversations) is
+  // fine — EmptyState falls back to the cold-start view until populated.
+  conversations: ConversationSummary[];
   onRegenerate: () => void;
   onSelectSuggestion: (text: string) => void;
+  onSelectFollowUp: (prompt: string) => void;
+  onEditAndResend: (messageId: string, newText: string) => void;
 };
 
-export function MessageList({ messages, status, onRegenerate, onSelectSuggestion }: Props) {
+export function MessageList({
+  messages,
+  status,
+  conversations,
+  onRegenerate,
+  onSelectSuggestion,
+  onSelectFollowUp,
+  onEditAndResend,
+}: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [stuckToBottom, setStuckToBottom] = useState(true);
 
@@ -59,9 +76,22 @@ export function MessageList({ messages, status, onRegenerate, onSelectSuggestion
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-8 sm:px-6 lg:py-10">
         <div className="mx-auto flex max-w-3xl flex-col gap-8">
           {isEmpty ? (
-            <EmptyState onSelectSuggestion={onSelectSuggestion} />
+            <EmptyState
+              onSelectSuggestion={onSelectSuggestion}
+              conversations={conversations}
+            />
           ) : (
             messages.map((m, i) => {
+              if (m.role === "user") {
+                return (
+                  <EditableUserBubble
+                    key={m.id}
+                    message={m}
+                    canEdit={status === "ready"}
+                    onEditAndResend={onEditAndResend}
+                  />
+                );
+              }
               const isLast = i === lastAssistantIndex;
               return (
                 <Bubble
@@ -70,6 +100,7 @@ export function MessageList({ messages, status, onRegenerate, onSelectSuggestion
                   showActions={isLast && status === "ready"}
                   inFlight={isLast && status !== "ready"}
                   onRegenerate={onRegenerate}
+                  onSelectFollowUp={onSelectFollowUp}
                 />
               );
             })
@@ -98,37 +129,26 @@ export function MessageList({ messages, status, onRegenerate, onSelectSuggestion
   );
 }
 
+// Renders an assistant message — text + tool calls grouped into the steps
+// disclosure plus the final answer. User bubbles go through EditableUserBubble
+// at the messages.map level; this component only handles assistant rendering.
 function Bubble({
   message,
   showActions,
   inFlight,
   onRegenerate,
+  onSelectFollowUp,
 }: {
   message: UIMessage;
   showActions: boolean;
   inFlight: boolean;
   onRegenerate: () => void;
+  onSelectFollowUp: (prompt: string) => void;
 }) {
-  const isUser = message.role === "user";
-
   type TextPart = { type: "text"; text: string };
   const isTextPart = (p: unknown): p is TextPart =>
     typeof p === "object" && p !== null && "type" in p &&
     (p as { type: string }).type === "text";
-
-  if (isUser) {
-    const userText = message.parts
-      .filter(isTextPart)
-      .map((p) => p.text)
-      .join("\n\n");
-    return (
-      <div className="flex justify-end animate-message-in">
-        <div className="max-w-[75%] whitespace-pre-wrap rounded-2xl bg-brand-sand px-4 py-2.5 leading-relaxed text-brand-charcoal">
-          {userText}
-        </div>
-      </div>
-    );
-  }
 
   // Walk parts in order, grouping consecutive text into one bubble so the
   // UI mirrors how the assistant actually thought: text → tool → text → tool.
@@ -222,6 +242,9 @@ function Bubble({
           <div className="text-[11px] text-brand-ink-soft">
             Data: {citations.join(", ")}
           </div>
+        )}
+        {showActions && hasText && (
+          <FollowUpChips onSelect={onSelectFollowUp} />
         )}
         {showActions && hasText && (
           <MessageActions text={allText} onRegenerate={onRegenerate} />

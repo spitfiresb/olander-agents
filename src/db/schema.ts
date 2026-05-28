@@ -92,7 +92,8 @@ export const members = pgTable("member", {
 // --- Chat persistence (TODO §3) --------------------------------------------
 // One row per chat. `deletedAt` is the soft-delete tombstone; reads filter on
 // `deletedAt IS NULL`. Title is the first 60 chars of the first user message,
-// editable later via PATCH.
+// editable later via PATCH. `pinnedAt` is null for unpinned chats; pinned
+// chats sort by pinnedAt desc above the recency groups.
 export const conversations = pgTable(
   "conversation",
   {
@@ -110,14 +111,32 @@ export const conversations = pgTable(
       .notNull()
       .defaultNow(),
     deletedAt: timestamp("deletedAt", { mode: "date", withTimezone: true }),
+    pinnedAt: timestamp("pinnedAt", { mode: "date", withTimezone: true }),
   },
-  (t) => [index("conv_user_updated_idx").on(t.userId, t.updatedAt)],
+  (t) => [
+    index("conv_user_updated_idx").on(t.userId, t.updatedAt),
+    // Backs the pinned-first ordering in listConversations. The pinnedAt
+    // column is nullable; NULLs sort to the end via the ORDER BY clause.
+    index("conv_user_pinned_idx").on(t.userId, t.pinnedAt),
+  ],
 );
 
 // One row per message. `parts` carries the full UIMessage parts array
 // (text + tool-invocation + tool-result), so replay on reload looks
 // identical to the original render. `model` and `usage` are nullable so
 // historical rows from before we logged them stay valid.
+//
+// `searchText` is the flattened concatenation of text parts, populated at
+// write time. The Postgres tsvector column (`searchVector`) is declared in
+// the migration SQL as a STORED generated column over `searchText` plus a
+// GIN index — it's queried via raw `sql` template literals from
+// lib/conversations because drizzle doesn't model tsvector natively.
+//
+// `supersededAt` is the edit-and-resend tombstone: when a user edits an
+// earlier message, every row at or after that message's createdAt is
+// stamped with supersededAt = now() and disappears from user-facing reads
+// (loadMessages, exportConversationMarkdown). Admin queries / audit logs
+// see everything. Nullable; reads filter with `IS NULL`.
 export const messages = pgTable(
   "message",
   {
@@ -131,11 +150,16 @@ export const messages = pgTable(
     parts: jsonb("parts").notNull(),
     model: text("model"),
     usage: jsonb("usage"),
+    searchText: text("searchText").notNull().default(""),
     createdAt: timestamp("createdAt", { mode: "date", withTimezone: true })
       .notNull()
       .defaultNow(),
+    supersededAt: timestamp("supersededAt", { mode: "date", withTimezone: true }),
   },
-  (t) => [index("msg_conv_created_idx").on(t.conversationId, t.createdAt)],
+  (t) => [
+    index("msg_conv_created_idx").on(t.conversationId, t.createdAt),
+    index("msg_conv_superseded_idx").on(t.conversationId, t.supersededAt),
+  ],
 );
 
 // Catalog row metadata — one row per inv_mast_uid mirroring p21_view_inv_mast.
