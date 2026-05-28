@@ -207,7 +207,7 @@ export const catalogItem = pgTable("catalog_item", {
 // Three tables hold the editable scope catalog the admin UI manages at
 // /admin/scopes. They replace the hardcoded tables that used to live in
 // src/lib/scopes.ts. Stored as data so admins can rename, regroup, add, and
-// delete scopes without code changes. The seed in drizzle/0007_*.sql lays
+// delete scopes without code changes. The seed in drizzle/0008_*.sql lays
 // down a 10-scope base layout grounded in the live P21 schema dump; the same
 // defaults live in src/lib/scope-defaults.ts so the admin UI's "Reset to
 // defaults" can rebuild them.
