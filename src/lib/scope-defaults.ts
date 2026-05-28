@@ -1,5 +1,5 @@
 // Default scope catalog — shipped as the base layout for the admin UI at
-// /admin/scopes. The migration drizzle/0007_*.sql seeds these into the
+// /admin/scopes. The migration drizzle/0008_*.sql seeds these into the
 // scope / scope_view / scope_entity tables on first run. The "Reset to
 // defaults" action in the admin UI re-applies them by wiping and re-seeding,
 // so this file IS the single source of truth — keep it and the SQL seed in

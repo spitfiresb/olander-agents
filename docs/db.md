@@ -71,18 +71,18 @@ Tiers (`member.role`, mirrored onto `user.role`):
 
 The `member.dataScopes` column gates which P21 data the chatbot will let that user query — independent of the tier. Mirrored onto `user.dataScopes` at login; `/api/chat` reads it off the session, loads the live scope catalog via `loadScopeCatalog()`, and feeds both into `buildTools(scopes, catalog)` so the scope check fires before any P21 / Qdrant call.
 
-- **Scope catalog lives in the database** in three editable tables (`scope`, `scope_view`, `scope_entity`) — see below. The base 10-bucket layout (`items`, `stock`, `customers`, `sales`, `invoices`, `pricing`, `traceability`, `inbound`, `outbound`, `purchasing`) is seeded by migration `0007` and mirrored in `src/lib/scope-defaults.ts`. Admins edit the catalog at `/admin/scopes` — drag a view between bucket columns, rename buckets inline, add new buckets, delete buckets (blocked if any member references them), or "Reset to defaults" to wipe and re-seed.
+- **Scope catalog lives in the database** in three editable tables (`scope`, `scope_view`, `scope_entity`) — see below. The base 10-bucket layout (`items`, `stock`, `customers`, `sales`, `invoices`, `pricing`, `traceability`, `inbound`, `outbound`, `purchasing`) is seeded by migration `0008` and mirrored in `src/lib/scope-defaults.ts`. Admins edit the catalog at `/admin/scopes` — drag a view between bucket columns, rename buckets inline, add new buckets, delete buckets (blocked if any member references them), or "Reset to defaults" to wipe and re-seed.
 - **Admins bypass.** Tier `admin` is always treated as `"all"` — `dataScopes` on an admin row is informational only and only matters if they're later demoted.
 - **null = "use tier default"** (the buckets flagged `defaultForUser: true` in the catalog). The default set is everything operational; `pricing` is the lone opt-in bucket.
 - **Empty array (`[]`) = "no access"** — the user can sign in but every `viewsQuery`/`entityGet`/`searchCatalog` call returns `scope_denied`.
 - **Uncategorized views are denied for non-admins.** A new P21 view that isn't mapped to any scope shows up under `/admin/scopes` → "Unassigned" and is rejected as `uncategorized_resource` until an admin places it. To ship a new default mapping, add it to `DEFAULT_VIEW_SCOPES` in `src/lib/scope-defaults.ts` and re-run the seed (or hit "Reset to defaults" in the UI).
 - **Member assignment at `/admin/members`** — the "Data access" cell on each row opens a picker with checkboxes for the live catalog; saves through `setMemberScopesAction`. **Catalog editing at `/admin/scopes`** — drag-and-drop board reading the three tables and writing via server actions in `src/app/admin/scopes/actions.ts`. See `TESTING.md` § "When you change scope catalog state".
 
-The `0002` migration creates `member`, backfills it from existing `user` rows (so nobody currently signed in is locked out by the switch from a domain allowlist), and seeds the project owners as bootstrap admins. Verify with `SELECT email, role FROM member ORDER BY "createdAt"`. The `0006` migration adds the `dataScopes` columns to `member` and `user` (both nullable, jsonb arrays of scope name strings).
+The `0002` migration creates `member`, backfills it from existing `user` rows (so nobody currently signed in is locked out by the switch from a domain allowlist), and seeds the project owners as bootstrap admins. Verify with `SELECT email, role FROM member ORDER BY "createdAt"`. The `0007` migration adds the `dataScopes` columns to `member` and `user` (both nullable, jsonb arrays of scope name strings).
 
 ### Scope catalog tables (`scope`, `scope_view`, `scope_entity`)
 
-Added by migration `0007`. They make the bucketing **editable** so admins can rename, regroup, add, and delete buckets without code changes.
+Added by migration `0008`. They make the bucketing **editable** so admins can rename, regroup, add, and delete buckets without code changes.
 
 | Table | Notes |
 | --- | --- |

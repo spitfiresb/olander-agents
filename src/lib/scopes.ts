@@ -5,7 +5,7 @@ import type { Role } from "@/db/schema";
 
 // Data-access scopes — editable from /admin/scopes, stored as data in the
 // `scope`, `scope_view`, and `scope_entity` tables. The base 10-scope layout
-// is seeded by drizzle/0007_*.sql and mirrored in src/lib/scope-defaults.ts.
+// is seeded by drizzle/0008_*.sql and mirrored in src/lib/scope-defaults.ts.
 //
 // Callers load a snapshot via loadScopeCatalog() once per request and pass it
 // into the allow checks. Three small SELECTs over <200 rows total — keep it
