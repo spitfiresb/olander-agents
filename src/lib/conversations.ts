@@ -17,30 +17,6 @@ export function deriveTitleFromText(text: string): string {
     : trimmed;
 }
 
-// Correlated subquery used by both list+search to fetch each conversation's
-// first user-message text as a snippet for the empty-state recent-chat cards
-// (Stage 4b). LEFT(..., 220) caps bandwidth — CSS line-clamp truncates the
-// visible portion; 220 is just a buffer so the clamp boundary always lands
-// before the DB cap. Filters supersededAt IS NULL so edit-and-resend doesn't
-// resurrect a dropped first message into the card.
-//
-// Literal table/column identifiers (not Drizzle ${table} interpolations) on
-// purpose: when this subquery sat in a SELECT clause alongside the outer
-// query's FROM "conversation", Drizzle's `${conversations.id}` correlation
-// reference was being emitted unqualified — Postgres then resolved it to
-// the subquery's own scope (m.id), making the join self-referential and
-// always non-matching. Result was snippet=null on every row. Schema names
-// are hand-cited from src/db/schema.ts; keep in sync if those rename.
-const firstUserSnippetSql = sql<string | null>`(
-  SELECT LEFT(m."searchText", 220)
-  FROM "message" m
-  WHERE m."conversationId" = "conversation"."id"
-    AND m."role" = 'user'
-    AND m."supersededAt" IS NULL
-  ORDER BY m."createdAt" ASC
-  LIMIT 1
-)`;
-
 export async function listConversations(userId: string) {
   return db
     .select({
@@ -48,7 +24,6 @@ export async function listConversations(userId: string) {
       title: conversations.title,
       updatedAt: conversations.updatedAt,
       pinnedAt: conversations.pinnedAt,
-      snippet: firstUserSnippetSql,
     })
     .from(conversations)
     .where(and(eq(conversations.userId, userId), isNull(conversations.deletedAt)))
@@ -78,7 +53,6 @@ export async function searchConversations(userId: string, query: string) {
       title: conversations.title,
       updatedAt: conversations.updatedAt,
       pinnedAt: conversations.pinnedAt,
-      snippet: firstUserSnippetSql,
       rank: sql<number>`
         coalesce(
           max(ts_rank_cd(${messages}."searchVector", plainto_tsquery('english', ${trimmed}))),

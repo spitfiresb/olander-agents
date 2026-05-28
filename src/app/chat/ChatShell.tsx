@@ -655,7 +655,6 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
           <MessageList
             messages={messages}
             status={status}
-            conversations={conversations}
             onRegenerate={() => regenerate()}
             onSelectSuggestion={setInput}
             onSelectFollowUp={selectFollowUp}
