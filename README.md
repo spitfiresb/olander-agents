@@ -6,6 +6,7 @@ assistant answers by querying Prophet 21 through a typed, read-only proxy.
 
 See `VISION.md` for the product framing and `DESIGN.md` for the visual system.
 
+
 ## What this is, in 30 seconds
 
 - **Frontend**: Next.js 16 App Router on Vercel. Streaming chat UI with
