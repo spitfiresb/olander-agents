@@ -313,6 +313,18 @@ export async function POST(req: Request) {
     ),
   );
 
+  // Inject today's date (Pacific, matching P21's wall clock) so the model
+  // doesn't infer "now" from its training cutoff when writing time-relative
+  // filters like "the last 30 days" or "shipping this week". Computed every
+  // request so the anchor moves with the actual server clock; cache busts
+  // at midnight Pacific, which is well below the ephemeral cache TTL anyway.
+  const todayPacific = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+
   const result = streamText({
     model,
     // SystemModelMessage form lets us mark the prompt for Anthropic's
@@ -321,7 +333,12 @@ export async function POST(req: Request) {
     // tokens and shaves measurable latency off every turn after the first.
     system: {
       role: "system",
-      content: SYSTEM_PROMPT,
+      content:
+        `Today is ${todayPacific} (Pacific time, America/Los_Angeles). ` +
+        `Use this as the anchor for any "today", "yesterday", "this week", ` +
+        `"last N days", or "next N days" filter you write. Do NOT infer the ` +
+        `date from your training data — the injected date above is authoritative.\n\n` +
+        SYSTEM_PROMPT,
       providerOptions: {
         anthropic: { cacheControl: { type: "ephemeral" } },
       },
