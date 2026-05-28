@@ -55,7 +55,24 @@ export function bucketsFromCatalog(catalog: ScopeCatalog): ScopeBucket[] {
     }));
 }
 
+// Per-process catalog cache. Three SELECTs per chat request adds up on the
+// warm path; admins change the catalog rarely, so a short TTL is invisible
+// in practice. Admin mutators call invalidateScopeCatalog() to drop the
+// cache eagerly; everyone else just waits up to TTL_MS for the next refresh.
+// Each Vercel function instance has its own cache — Reset invalidates only
+// this instance, but the 30s window for other instances is acceptable
+// (the catalog is read-mostly; eventual consistency is fine here).
+const CATALOG_TTL_MS = 30_000;
+let catalogCache: { value: ScopeCatalog; expiresAt: number } | null = null;
+
+export function invalidateScopeCatalog(): void {
+  catalogCache = null;
+}
+
 export async function loadScopeCatalog(): Promise<ScopeCatalog> {
+  const now = Date.now();
+  if (catalogCache && catalogCache.expiresAt > now) return catalogCache.value;
+
   const [scopeRows, viewRows, entityRows] = await Promise.all([
     db
       .select()
@@ -97,7 +114,9 @@ export async function loadScopeCatalog(): Promise<ScopeCatalog> {
     entityToScope.set(`${r.area.toLowerCase()}/${r.resource.toLowerCase()}`, r.scopeKey);
   }
 
-  return { scopes, viewToScope, entityToScope };
+  const catalog = { scopes, viewToScope, entityToScope };
+  catalogCache = { value: catalog, expiresAt: now + CATALOG_TTL_MS };
+  return catalog;
 }
 
 // Build a ScopeCatalog from in-memory data — handy for tests that don't want

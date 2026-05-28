@@ -16,6 +16,7 @@ import {
   DEFAULT_SCOPES,
   DEFAULT_VIEW_SCOPES,
 } from "@/lib/scope-defaults";
+import { invalidateScopeCatalog } from "@/lib/scopes";
 
 // Server actions behind /admin/scopes. Every one re-checks the admin role
 // server-side; thrown errors surface in the client as inline error text.
@@ -33,6 +34,10 @@ async function requireAdmin() {
 }
 
 function revalidate() {
+  // Drop the per-process catalog cache so the next chat request sees the new
+  // assignments without waiting for the TTL. Other Vercel instances refresh
+  // on their next TTL expiry — acceptable since the catalog is read-mostly.
+  invalidateScopeCatalog();
   revalidatePath("/admin/scopes");
   revalidatePath("/admin/members");
 }
