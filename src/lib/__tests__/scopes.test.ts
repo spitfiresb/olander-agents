@@ -76,8 +76,7 @@ describe("scopeForView (default catalog)", () => {
     expect(scopeForView("p21_view_job_price_line", catalog)).toBe("pricing");
   });
 
-  it("traceability covers lots, serials, pallets and document-line allocations", () => {
-    expect(scopeForView("p21_view_lot", catalog)).toBe("traceability");
+  it("traceability covers serials, pallets and document-line allocations", () => {
     expect(scopeForView("p21_view_serial_number", catalog)).toBe(
       "traceability",
     );
@@ -85,6 +84,13 @@ describe("scopeForView (default catalog)", () => {
     expect(scopeForView("p21_view_document_line_lot", catalog)).toBe(
       "traceability",
     );
+  });
+
+  it("p21_view_lot lives in pricing, not traceability — it carries sku_cost", () => {
+    // The lot view exposes per-lot cost basis (`sku_cost`), so it's filed
+    // under the opt-in `pricing` bucket. Non-admin lot-tracking requires
+    // explicit pricing access. Audit finding from 2026-05-27.
+    expect(scopeForView("p21_view_lot", catalog)).toBe("pricing");
   });
 
   it("inbound: receipts, returns to vendor, RMA, adjustments", () => {

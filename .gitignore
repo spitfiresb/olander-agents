@@ -61,3 +61,4 @@ next-env.d.ts
 # one-off diagnostic scripts (live next to the long-lived scripts/ entries
 # but should stay local — they're tied to a specific debug session)
 /scripts/diag-*.mjs
+/scripts/dev-*.ts

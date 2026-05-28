@@ -112,7 +112,10 @@ export const DEFAULT_VIEW_SCOPES: ReadonlyArray<readonly [string, string]> = [
   ["p21_view_bin_type", "stock"],
   ["p21_view_branch", "stock"],
   ["p21_view_class", "items"],
-  ["p21_view_company", "items"],
+  // p21_view_company intentionally unassigned — it's a 215-col company-level
+  // config record (GL account numbers for every cost/revenue/payroll account,
+  // fiscal-year settings, tax config). Doesn't fit any operational bucket;
+  // deny-by-default for non-admins is the correct posture. Admins bypass.
   ["p21_view_contacts", "customers"],
   ["p21_view_contacts_x_links", "customers"],
   ["p21_view_customer", "customers"],
@@ -165,7 +168,12 @@ export const DEFAULT_VIEW_SCOPES: ReadonlyArray<readonly [string, string]> = [
   ["p21_view_job_price_line", "pricing"],
   ["p21_view_language", "items"],
   ["p21_view_location", "stock"],
-  ["p21_view_lot", "traceability"],
+  // p21_view_lot moved from traceability → pricing because it carries
+  // `sku_cost` per lot — a clean margin leak through a default-on bucket.
+  // Trade-off: non-admin lot-tracking questions ("what lots do we have of
+  // part X?") now require the opt-in `pricing` scope. Other lot views
+  // (lot_bin_*, lot_detail) stay in traceability since they carry no cost.
+  ["p21_view_lot", "pricing"],
   ["p21_view_lot_bin_detail", "traceability"],
   ["p21_view_lot_bin_xref", "traceability"],
   ["p21_view_lot_detail", "traceability"],
