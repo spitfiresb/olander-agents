@@ -4,7 +4,13 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { normalizeEmail } from "@/lib/auth-allowlist";
-import { addMember, listMembers, setMemberRole } from "@/lib/members";
+import {
+  addMember,
+  listMembers,
+  setMemberRole,
+  setMemberScopes,
+} from "@/lib/members";
+import { loadScopeCatalog } from "@/lib/scopes";
 
 // Server actions behind /admin/members. Every one re-checks the admin role
 // server-side — the disabled controls in the UI are a courtesy, not the gate.
@@ -74,6 +80,29 @@ export async function setTiersAction(
   for (const c of normalized) {
     await setMemberRole(c.email, c.role);
   }
+  revalidatePath("/admin/members");
+}
+
+// Set the per-member data-scope override. `scopes === null` clears the
+// override and falls back to the tier default; an empty array means "no
+// scopes" (every P21 view/entity call is denied). Admins are a no-op — they
+// bypass the scope check regardless — but we still write the row so the admin
+// UI reflects the choice if the user is later demoted.
+export async function setMemberScopesAction(
+  email: string,
+  scopes: string[] | null,
+): Promise<void> {
+  await requireAdmin();
+  const e = normalizeEmail(emailSchema.parse(email));
+  let cleaned: string[] | null = null;
+  if (scopes !== null) {
+    const parsed = z.array(z.string().min(1).max(64)).parse(scopes);
+    // Validate against the live catalog so a stale client (older bundle that
+    // still knows about a since-deleted scope) can't write a phantom key.
+    const catalog = await loadScopeCatalog();
+    cleaned = parsed.filter((k) => catalog.scopes.has(k));
+  }
+  await setMemberScopes(e, cleaned);
   revalidatePath("/admin/members");
 }
 

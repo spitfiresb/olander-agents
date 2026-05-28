@@ -72,6 +72,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     session({ session, user }) {
       session.user.id = user.id;
       session.user.role = user.role;
+      // `dataScopes` is null when the member row says "use the tier default".
+      // Effective scopes are resolved against this at call time by
+      // src/lib/scopes.ts; admins bypass the check entirely.
+      session.user.dataScopes = (user as { dataScopes?: string[] | null })
+        .dataScopes ?? null;
       return session;
     },
   },
@@ -84,9 +89,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     // row; only writes when the value differs.
     async signIn({ user }) {
       if (!user?.email || !user.id) return;
-      const { allowed, role } = await isAllowedMember(user.email);
-      if (allowed && user.role !== role) {
-        await db.update(users).set({ role }).where(eq(users.id, user.id));
+      const { allowed, role, dataScopes } = await isAllowedMember(user.email);
+      if (!allowed) return;
+      const currentScopes =
+        (user as { dataScopes?: string[] | null }).dataScopes ?? null;
+      const roleChanged = user.role !== role;
+      const scopesChanged =
+        JSON.stringify(currentScopes ?? null) !==
+        JSON.stringify(dataScopes ?? null);
+      if (roleChanged || scopesChanged) {
+        await db
+          .update(users)
+          .set({ role, dataScopes })
+          .where(eq(users.id, user.id));
       }
     },
   },

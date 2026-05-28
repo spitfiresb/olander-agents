@@ -49,6 +49,22 @@ Update this file when a new class of regression bites us. Promote sections up th
 - [ ] "Remove user" still goes through `setMemberRole(email, "revoked")` — deletes that user's `session` rows and sets `user.role = "revoked"`; the row stays but `listMembers` (which filters out `revoked`) hides it; re-adding the email restores it.
 - [ ] `npm test` covers `normalizeEmail` / `parseBootstrapAdmins` / `evaluateTenant` (the DB-touching `members.ts` isn't unit-tested by design — same reason `auth-allowlist.ts` is split out).
 
+### When you change scope catalog state
+**Surface:** `src/lib/scopes.ts`, `src/lib/scope-defaults.ts`, `src/lib/ai/tools.ts` (`buildTools`), `src/app/api/chat/route.ts`, `src/app/admin/scopes/*`, `src/app/admin/members/ScopePickerDialog.tsx`, the `scope` / `scope_view` / `scope_entity` tables, `member.dataScopes` + `user.dataScopes` columns.
+
+- [ ] Admin tier still bypasses (`effectiveScopes("admin", _, catalog) === "all"`); admins keep `viewsQuery`/`entityGet` on every view regardless of how the catalog is shaped.
+- [ ] Default non-admin scopes still cover everything operational and exclude `pricing` (margin-bearing job pricing is the one opt-in bucket). The point is that signing in as a normal user does **not** expose customer-specific contract margins without an admin opt-in.
+- [ ] Deny-by-default for uncategorized views — a fresh `p21_view_*` that no scope owns is denied for non-admins. When you add a new view to `system-prompt.ts` or tool examples, either map it via `/admin/scopes` or add it to `DEFAULT_VIEW_SCOPES` in `scope-defaults.ts` in the same PR.
+- [ ] After re-running `scripts/droplet/dump-p21-schema.sh` (or `scripts/build-p21-catalog.mjs`), diff the new view list against the seed in `scope-defaults.ts` and confirm nothing sensitive lands in a low-sensitivity bucket. New compounds that nobody mapped surface in `/admin/scopes` → "Unassigned" → denied, which is the signal to triage and explicitly categorize.
+- [ ] `/admin/scopes` page loads cleanly as an admin; bucket cards collapse by default and `localStorage` (`olander.scopes.expanded`) persists which were expanded; chevron toggles expand state per column; drag-and-drop into a collapsed bucket header works (the column header stays an active drop zone); search auto-expands columns with matches.
+- [ ] Creating, renaming (inline), moving views (drag or ⋮ menu), deleting a scope all work; delete is blocked when a member references the bucket and shows a clear error.
+- [ ] "Reset to defaults" wipes and re-seeds: ten buckets reappear, all 118 views map back to the documented buckets, member overrides with surviving keys still work.
+- [ ] `searchCatalog` still gates on whatever scope owns `p21_view_inv_mast` (defaults to `items`) — bypassing the gate via the semantic-search path is the obvious hole.
+- [ ] `events.signIn` in `src/auth.ts` still mirrors `member.dataScopes` onto `user.dataScopes` on every login (otherwise per-member overrides only land after the user signs in *again*).
+- [ ] `session.user.dataScopes` is still surfaced in the session callback — `/api/chat` reads it directly without a second DB hit.
+- [ ] `setMemberScopesAction` still re-checks `requireAdmin()` server-side; the new actions in `src/app/admin/scopes/actions.ts` (create / update / delete / move / reset) all do the same.
+- [ ] `npm test` covers `scopes.ts` (bucketing against `scope-defaults.ts`, default user, admin bypass, uncategorized denial, sanitize, catalog hygiene).
+
 ---
 
 ## 2. Chat (core product — 3 fix commits)
@@ -72,7 +88,7 @@ Update this file when a new class of regression bites us. Promote sections up th
 ### When you change `src/app/api/chat/route.ts`
 - [ ] `UserTextPart` still rejects non-text parts.
 - [ ] `BodySchema` still bounds messages at `.max(50)`.
-- [ ] `stepCountIs(8)` is still the stop condition (or higher — never unbounded).
+- [ ] `stepCountIs(10)` is the stop condition (or higher — never unbounded). Was tightened to 4 at one point and the chatbot started returning empty responses on chains like `describeView → viewsQuery (retry) → viewsQuery (retry) → viewsQuery (success)` because the loop terminated before the model got a synthesis step. With `describeView` in the loop, leave plenty of headroom.
 - [ ] `auth()` gate is still in place; the only bypass is the dev `ALLOW_UNAUTHED_DEV` flag.
 - [ ] Errors return JSON, not throw — frontend expects shaped error responses.
 

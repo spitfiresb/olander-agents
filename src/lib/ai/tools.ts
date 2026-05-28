@@ -1,7 +1,14 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { embedQuery } from "@/lib/ai/embeddings";
+import { getViewSchema } from "@/lib/ai/p21-schema";
 import { qdrantConfigured, searchCatalogByVector } from "@/lib/ai/qdrant";
+import {
+  isEntityAllowed,
+  isViewAllowed,
+  type EffectiveScopes,
+  type ScopeCatalog,
+} from "@/lib/scopes";
 
 // Layer 3 chatbot tools. Both call the Layer 2 proxy on the droplet, which:
 //   - holds the P21 credentials
@@ -81,7 +88,62 @@ const SAFE_ORDER_BY = z
   .max(128)
   .regex(/^[a-z0-9_]+(\s+(asc|desc))?$/i, "orderBy must be `<column>` or `<column> asc|desc`");
 
-const viewsQuery = tool({
+// Shape of a scope-denied tool result. The model can read `error` +
+// `scope_required` and tell the rep "you'd need <scope> access for that"
+// instead of retrying the same call.
+type ScopeDenied =
+  | {
+      error: "scope_denied";
+      resource: string;
+      scope_required: string;
+      scope_label: string;
+    }
+  | {
+      error: "uncategorized_resource";
+      resource: string;
+      detail: string;
+    };
+
+function denyForView(decision: ReturnType<typeof isViewAllowed>): ScopeDenied {
+  if (decision.ok) throw new Error("denyForView called on ok decision");
+  if (decision.reason === "uncategorized") {
+    return {
+      error: "uncategorized_resource",
+      resource: decision.resource,
+      detail:
+        "This view is not categorized into any data-access scope. Ask an admin to map it at /admin/scopes.",
+    };
+  }
+  return {
+    error: "scope_denied",
+    resource: decision.resource,
+    scope_required: decision.scope,
+    scope_label: decision.scopeLabel,
+  };
+}
+
+function denyForEntity(
+  decision: ReturnType<typeof isEntityAllowed>,
+): ScopeDenied {
+  if (decision.ok) throw new Error("denyForEntity called on ok decision");
+  if (decision.reason === "uncategorized") {
+    return {
+      error: "uncategorized_resource",
+      resource: decision.resource,
+      detail:
+        "This entity route is not categorized into any data-access scope. Ask an admin to map it at /admin/scopes.",
+    };
+  }
+  return {
+    error: "scope_denied",
+    resource: decision.resource,
+    scope_required: decision.scope,
+    scope_label: decision.scopeLabel,
+  };
+}
+
+function makeViewsQuery(scopes: EffectiveScopes, catalog: ScopeCatalog) {
+  return tool({
   description:
     "Run a filtered, projected, sorted query against a P21 SQL view via the droplet proxy. " +
     "The primary tool for search-style questions: which parts, which customers, which orders. " +
@@ -124,6 +186,8 @@ const viewsQuery = tool({
     ),
   }),
   execute: async (input) => {
+    const decision = isViewAllowed(input.viewName, scopes, catalog);
+    if (!decision.ok) return denyForView(decision);
     const result = await callProxy("POST", `/proxy/views/${encodeURIComponent(input.viewName)}`, {
       filter: input.filter,
       top: input.top ?? 20,
@@ -133,7 +197,43 @@ const viewsQuery = tool({
     });
     return result;
   },
-});
+  });
+}
+
+function makeDescribeView(scopes: EffectiveScopes, catalog: ScopeCatalog) {
+  return tool({
+    description:
+      "List a P21 SQL view's columns + types. Call this BEFORE viewsQuery " +
+      "whenever you pick a view outside the fast-path seven (inv_mast, inv_loc, " +
+      "customer, vendor, oe_hdr, oe_line, po_hdr) so you can project the right " +
+      "columns in $select instead of guessing. Returns { columns: [{ name, " +
+      "type, nullable, key }] }. Reads from a bundled schema snapshot — no " +
+      "upstream round-trip, so it's fast and free.",
+    inputSchema: z.object({
+      viewName: z
+        .string()
+        .regex(
+          /^p21_view_[a-z0-9_]+$/i,
+          "must match p21_view_* (e.g. p21_view_transfer_hdr)",
+        ),
+    }),
+    execute: async ({ viewName }) => {
+      const decision = isViewAllowed(viewName, scopes, catalog);
+      if (!decision.ok) return denyForView(decision);
+      const view = getViewSchema(viewName);
+      if (!view) {
+        return {
+          error: "view_not_in_schema" as const,
+          viewName,
+          detail:
+            "View is not in the bundled P21 schema snapshot. If P21 added new views, " +
+            "re-run scripts/droplet/dump-p21-schema.sh then scripts/build-p21-catalog.mjs.",
+        };
+      }
+      return { columns: view.columns };
+    },
+  });
+}
 
 // Reject suspicious entity IDs (newlines, slashes, quotes) before they hit
 // the proxy URL. P21 IDs are reliably alphanumeric + dashes/dots, which keeps
@@ -144,7 +244,8 @@ const SAFE_ID = z
   .max(64)
   .regex(/^[A-Za-z0-9._-]+$/, "id must be alphanumeric (dash/dot/underscore allowed)");
 
-const entityGet = tool({
+function makeEntityGet(scopes: EffectiveScopes, catalog: ScopeCatalog) {
+  return tool({
   description:
     "Fetch a single full P21 entity record by ID via the droplet proxy. " +
     "Use this after a viewsQuery surfaces a row that needs more detail. " +
@@ -175,6 +276,8 @@ const entityGet = tool({
       .describe("Optional endpoint-specific value to fetch related sub-objects in one call."),
   }),
   execute: async ({ area, resource, id, extendedProperties }) => {
+    const decision = isEntityAllowed(area, resource, scopes, catalog);
+    if (!decision.ok) return denyForEntity(decision);
     const query = extendedProperties
       ? `?extendedProperties=${encodeURIComponent(extendedProperties)}`
       : "";
@@ -185,7 +288,8 @@ const entityGet = tool({
     const result = await callProxy("GET", path);
     return result;
   },
-});
+  });
+}
 
 // ---------------------------------------------------------------------------
 // searchCatalog — semantic search over the parts catalog
@@ -211,7 +315,23 @@ type SearchError =
   | { error: "search_not_configured" }
   | { error: "search_failed"; detail: string };
 
-const searchCatalog = tool({
+// Exported so unit tests (searchCatalog-schema.test.ts) can exercise .parse()
+// without depending on the factory's inferred return type — the AI SDK widens
+// inputSchema to FlexibleSchema, which doesn't expose Zod's parse surface.
+export const searchCatalogInputSchema = z.object({
+  query: z
+    .string()
+    .min(2)
+    .max(256)
+    .describe(
+      "Natural-language description of the part. The rep's own phrasing is fine — " +
+        "don't translate to formal terminology.",
+    ),
+  topK: z.number().int().min(1).max(20).default(5),
+});
+
+function makeSearchCatalog(scopes: EffectiveScopes, catalog: ScopeCatalog) {
+  return tool({
   description:
     "Semantic search over Olander's parts catalog (the inventory master). Use this " +
     "when the rep describes a part in their own words — e.g. \"M10 stainless cap " +
@@ -222,21 +342,16 @@ const searchCatalog = tool({
     "entityGet({ area:'inventory', resource:'v2/parts', id:<sku> }) for those " +
     "(faster, authoritative). Returns { matches: [...] } with item_id, item_desc, " +
     "extended_desc, sales_pricing_unit, and a cosine-similarity score in [0,1].",
-  inputSchema: z.object({
-    query: z
-      .string()
-      .min(2)
-      .max(256)
-      .describe(
-        "Natural-language description of the part. The rep's own phrasing is fine — " +
-          "don't translate to formal terminology.",
-      ),
-    topK: z.number().int().min(1).max(20).default(5),
-  }),
+  inputSchema: searchCatalogInputSchema,
   execute: async ({
     query,
     topK,
-  }): Promise<{ matches: SearchMatch[] } | SearchError> => {
+  }): Promise<{ matches: SearchMatch[] } | SearchError | ScopeDenied> => {
+    // The catalog index is sourced from p21_view_inv_mast — gate it on
+    // whatever scope that view currently lives in so a member without that
+    // scope can't bypass the viewsQuery check via the semantic-search path.
+    const decision = isViewAllowed("p21_view_inv_mast", scopes, catalog);
+    if (!decision.ok) return denyForView(decision);
     if (!process.env.VOYAGE_API_KEY || !qdrantConfigured()) {
       return { error: "search_not_configured" };
     }
@@ -268,6 +383,18 @@ const searchCatalog = tool({
       };
     }
   },
-});
+  });
+}
 
-export const tools = { viewsQuery, entityGet, searchCatalog } as const;
+// Build the tool set for a single chat request. Pass the caller's effective
+// scopes ("all" for admins) along with the ScopeCatalog snapshot loaded at
+// request entry — every tool's execute path runs the scope check before any
+// I/O, so a denied call costs no proxy / Qdrant / Voyage round-trip.
+export function buildTools(scopes: EffectiveScopes, catalog: ScopeCatalog) {
+  return {
+    viewsQuery: makeViewsQuery(scopes, catalog),
+    describeView: makeDescribeView(scopes, catalog),
+    entityGet: makeEntityGet(scopes, catalog),
+    searchCatalog: makeSearchCatalog(scopes, catalog),
+  } as const;
+}

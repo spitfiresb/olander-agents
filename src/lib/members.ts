@@ -2,6 +2,7 @@ import { eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { members, sessions, users, type Role } from "@/db/schema";
 import { normalizeEmail, parseBootstrapAdmins } from "@/lib/auth-allowlist";
+import { loadScopeCatalog, type ScopeCatalog } from "@/lib/scopes";
 
 // Sign-in allowlist + member-tier management. The `member` table is the source
 // of truth for who may sign in and what tier they get; `user.role` (read by the
@@ -14,7 +15,28 @@ export type ActiveMember = {
   email: string;
   name: string | null;
   role: "user" | "admin";
+  // null = "tier default" (effective scopes resolved at call time by
+  // src/lib/scopes.ts). An admin row always carries null too — admins bypass
+  // the scope check, so the column is irrelevant for them.
+  dataScopes: string[] | null;
 };
+
+// Drop any scope keys that aren't in the catalog — forward-compatible if an
+// admin renames/removes a scope but legacy rows still carry the old key.
+function sanitizeScopes(
+  input: unknown,
+  catalog: ScopeCatalog,
+): string[] | null {
+  if (input === null || input === undefined) return null;
+  if (!Array.isArray(input)) return null;
+  const out: string[] = [];
+  for (const x of input) {
+    if (typeof x === "string" && catalog.scopes.has(x) && !out.includes(x)) {
+      out.push(x);
+    }
+  }
+  return out;
+}
 
 // Always-allowed / always-admin emails from the environment, independent of the
 // `member` table — first-admin bootstrap + break-glass if the table gets into a
@@ -26,36 +48,78 @@ export function getBootstrapAdmins(): string[] {
 
 // The sign-in gate's email half (the `tid` half lives in src/lib/auth-allowlist
 // .ts). `allowed` is false for `revoked` members and for emails with no row.
+// `dataScopes` mirrors the member row (null = tier default); always null for
+// bootstrap admins and revoked rows.
 export async function isAllowedMember(
   email: string,
-): Promise<{ allowed: boolean; role: Role }> {
+): Promise<{ allowed: boolean; role: Role; dataScopes: string[] | null }> {
   const e = normalizeEmail(email);
-  if (!e) return { allowed: false, role: "user" };
-  if (getBootstrapAdmins().includes(e)) return { allowed: true, role: "admin" };
+  if (!e) return { allowed: false, role: "user", dataScopes: null };
+  if (getBootstrapAdmins().includes(e)) {
+    return { allowed: true, role: "admin", dataScopes: null };
+  }
   const [row] = await db
-    .select({ role: members.role })
+    .select({ role: members.role, dataScopes: members.dataScopes })
     .from(members)
     .where(eq(members.email, e));
-  if (!row) return { allowed: false, role: "user" };
-  if (row.role === "revoked") return { allowed: false, role: "revoked" };
-  return { allowed: true, role: row.role };
+  if (!row) return { allowed: false, role: "user", dataScopes: null };
+  if (row.role === "revoked") {
+    return { allowed: false, role: "revoked", dataScopes: null };
+  }
+  const catalog = await loadScopeCatalog();
+  return {
+    allowed: true,
+    role: row.role,
+    dataScopes: sanitizeScopes(row.dataScopes, catalog),
+  };
 }
 
 // Members shown in /admin/members: everyone except the `revoked` ones (those
 // are hidden — re-add by email to restore them). Sorted with named members
 // first (alphabetical by name), then email-only rows (alphabetical by email).
 export async function listMembers(): Promise<ActiveMember[]> {
-  const rows = await db
-    .select({ email: members.email, role: members.role, name: users.name })
-    .from(members)
-    .leftJoin(users, sql`lower(${users.email}) = ${members.email}`)
-    .where(ne(members.role, "revoked"))
-    .orderBy(sql`(${users.name} is null), lower(${users.name}), ${members.email}`);
+  const [rows, catalog] = await Promise.all([
+    db
+      .select({
+        email: members.email,
+        role: members.role,
+        name: users.name,
+        dataScopes: members.dataScopes,
+      })
+      .from(members)
+      .leftJoin(users, sql`lower(${users.email}) = ${members.email}`)
+      .where(ne(members.role, "revoked"))
+      .orderBy(sql`(${users.name} is null), lower(${users.name}), ${members.email}`),
+    loadScopeCatalog(),
+  ]);
   return rows.map((r) => ({
     email: r.email,
     name: r.name,
     role: r.role === "admin" ? "admin" : "user",
+    dataScopes: sanitizeScopes(r.dataScopes, catalog),
   }));
+}
+
+// Per-member scope override. null clears the override and falls back to the
+// tier default; an empty array means "no scopes" (sign in but every P21 call
+// is denied). Mirrors onto the user row so /api/chat can read scopes off the
+// already-loaded session without a second DB hit.
+export async function setMemberScopes(
+  email: string,
+  scopes: string[] | null,
+): Promise<void> {
+  const e = normalizeEmail(email);
+  if (!e) throw new Error("invalid_email");
+  const catalog = await loadScopeCatalog();
+  const cleaned = scopes === null ? null : sanitizeScopes(scopes, catalog);
+  await db
+    .update(members)
+    .set({ dataScopes: cleaned })
+    .where(eq(members.email, e));
+  await db
+    .update(users)
+    .set({ dataScopes: cleaned })
+    .where(sql`lower(${users.email}) = ${e}`);
 }
 
 export async function addMember(

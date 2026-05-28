@@ -1,12 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { tools } from "@/lib/ai/tools";
+import { searchCatalogInputSchema as schema } from "@/lib/ai/tools";
 
 // We test the public Zod schema rather than the execute() path — execute()
 // requires VOYAGE_API_KEY and a populated pgvector index, which an
 // environmentless unit test should not assume. Schema coverage is what most
 // frequently regresses (typo in field name, accidentally widened bounds).
-
-const schema = tools.searchCatalog.inputSchema;
 
 describe("searchCatalog input schema", () => {
   it("accepts a basic descriptive query", () => {

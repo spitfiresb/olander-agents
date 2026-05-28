@@ -7,9 +7,10 @@ import {
   MODEL_TEMPERATURE,
 } from "@/lib/ai/model";
 import { SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
-import { tools } from "@/lib/ai/tools";
+import { buildTools } from "@/lib/ai/tools";
 import { isExcelMimeType, ownsAttachmentUrl } from "@/lib/blob";
 import { fetchAndConvertExcel } from "@/lib/excel";
+import { effectiveScopes, loadScopeCatalog } from "@/lib/scopes";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { isSameOrigin } from "@/lib/csrf";
 import {
@@ -157,6 +158,20 @@ export async function POST(req: Request) {
   } else if (!devBypass) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
+
+  // Resolve the caller's data-access scopes once per request. Dev-bypass +
+  // no session = "all" so local probes still hit P21; otherwise we read the
+  // session's role + per-member scope override and feed it into buildTools.
+  // The scope catalog is loaded from DB once here and threaded through every
+  // tool so each execute() can run the allow check without another query.
+  const scopeCatalog = await loadScopeCatalog();
+  const scopes = session?.user
+    ? effectiveScopes(
+        session.user.role,
+        session.user.dataScopes ?? null,
+        scopeCatalog,
+      )
+    : "all";
 
   // Per-user (or per-IP fallback) message-rate cap. 20/min with bursts up to
   // 20 — caps runaway clients without tripping a rep typing fast.
@@ -312,15 +327,16 @@ export async function POST(req: Request) {
       },
     },
     messages: await convertToModelMessages(modelFacingMessages as UIMessage[]),
-    tools,
+    tools: buildTools(scopes, scopeCatalog),
     temperature: MODEL_TEMPERATURE,
     maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS,
-    // Bumped from 4 → 6 (2026-05-16). Fastener lookups frequently need an
-    // initial broad search, a follow-up narrow on inv_mast, and an inv_loc
-    // join for stock — three steps just for the happy path, leaving no room
-    // for retries. Each extra step is more cost/latency; revisit if usage
-    // logs show conversations consistently hitting the cap.
-    stopWhen: stepCountIs(6),
+    // 10 steps = enough headroom for: describeView → multi-step viewsQuery
+    // chain (e.g. resolve location IDs, then transfers between them) → one or
+    // two retries on filter syntax → final synthesis. Originally 8 (per
+    // TESTING.md), tightened to 4 at some point — but with describeView in
+    // the loop the model legitimately needs more steps before answering, and
+    // hitting the cap means no final assistant text gets emitted.
+    stopWhen: stepCountIs(10),
     abortSignal: req.signal,
     onError: ({ error }) => {
       console.error("[chat] stream error:", mapToFriendlyCode(error), error);

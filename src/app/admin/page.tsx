@@ -54,6 +54,18 @@ export default async function AdminPage() {
               Control who can sign in and who&apos;s an admin.
             </div>
           </Link>
+
+          <Link
+            href="/admin/scopes"
+            className="block rounded-2xl border border-brand-charcoal/10 bg-white p-5 transition-colors hover:border-brand-charcoal/30 hover:bg-brand-sand/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red"
+          >
+            <div className="text-base font-medium text-brand-charcoal">
+              Data-access scopes
+            </div>
+            <div className="mt-1 text-sm text-brand-ink-soft">
+              Customize the buckets you grant on the Members page.
+            </div>
+          </Link>
         </div>
       </div>
     </div>
