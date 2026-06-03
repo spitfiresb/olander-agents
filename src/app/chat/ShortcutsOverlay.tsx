@@ -11,7 +11,7 @@ type Props = {
 // Mac vs non-Mac modifier label. useSyncExternalStore keeps this SSR-safe
 // (server snapshot is "Ctrl", which matches the not-yet-detected client
 // render; the snapshot re-reads after hydration and updates the dialog
-// content cleanly). Same pattern as useSpeechRecognition's supported flag.
+// content cleanly).
 const subscribeNoop = () => () => {};
 const detectMod = () =>
   typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent)
