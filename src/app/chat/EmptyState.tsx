@@ -2,34 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Logo } from "@/components/Logo";
-
-// Curated suggestion pool. Every entry was audited against live P21 data
-// via the droplet proxy + Qdrant catalog: each one returns a substantive,
-// demo-worthy result today. Specific choices that took data to settle:
-//   - "31C100SHCS" (5/16-18 X 1 SOC CAP SST) — has multi-warehouse stock
-//     (2,265 at HQ + 183 elsewhere), so "across all warehouses" actually
-//     shows a spread. PN12345-01 from the system-prompt examples comes back
-//     0 everywhere and reads as a dead demo.
-//   - "last 30 days" and "last 6 months" windows instead of "today" /
-//     "this month" — P21's most-recent activity in our test dataset trails
-//     the calendar by 1-2 weeks; narrower windows risked 0-row results.
-//
-// No aggregation-only prompts (the viewsQuery tool has no $apply/groupby).
-// No price-bearing prompts (the `pricing` scope is opt-in for non-admins).
-const SUGGESTION_POOL = [
-  "What size helicoil goes in a 3/8-16 hole?",
-  "Do we have any M10 1.25 socket head cap screws in stock?",
-  "What parts do we stock the most of?",
-  "Who carries bronze cap screws?",
-  "On-hand for 31C100SHCS across all warehouses",
-  "Find a 5/16-18 stainless flange nut",
-  "Stock check on 1/4-20 stainless lock nuts",
-  "Open sales orders shipping this week",
-  "Open POs landing in the next 14 days",
-  "Past-due invoices from the last 6 months",
-  "Open sales orders from the last 30 days",
-  "Customers added in the last 30 days",
-] as const;
+import { SUGGESTION_POOL } from "@/lib/suggestions";
 
 const VISIBLE_COUNT = 4;
 

@@ -74,6 +74,7 @@ Update this file when a new class of regression bites us. Promote sections up th
 **Why high:** This *is* the product. If chat doesn't stream, nothing else matters.
 
 ### Smoke check
+- [ ] **`npm run eval`** — runs every canonical query (the suggestion chips, from `src/lib/suggestions.ts`) end-to-end through model + tools + live P21, and fails on a blank answer, a step-cap loop, or a query whose tool calls *all* errored. This is the net that catches query-generation regressions (e.g. the OData date-literal bug — every date-ranged query was silently failing). Run after a deploy, or against a Vercel preview before merging. Hits live P21 + spends a little model budget, so it's a deliberate smoke, not per-commit.
 - [ ] Signed in, type a message into `/chat` composer and submit → assistant streams a reply.
 - [ ] Submitting again while a stream is in flight is handled (Stop button works, or the second message queues sanely).
 - [ ] The `inventorySearch` tool fires for a question like "do we have any M10 screws" → tool call + result render, model continues.
@@ -89,6 +90,7 @@ Update this file when a new class of regression bites us. Promote sections up th
 - [ ] `UserTextPart` still rejects non-text parts.
 - [ ] `BodySchema` still bounds messages at `.max(50)`.
 - [ ] `stepCountIs(10)` is the stop condition (or higher — never unbounded). Was tightened to 4 at one point and the chatbot started returning empty responses on chains like `describeView → viewsQuery (retry) → viewsQuery (retry) → viewsQuery (success)` because the loop terminated before the model got a synthesis step. With `describeView` in the loop, leave plenty of headroom.
+- [ ] `prepareStep` still forces `toolChoice: 'none'` on the final step. This guarantees a synthesized text answer instead of a blank when a model would otherwise spend the whole step budget looping on tool calls (seen with gpt-4o-mini repeating a failing PO search 10×). Paired with the self-healing error hints in `tools.ts` (`annotateViewError`), which tell the model to fix-and-not-retry a rejected query.
 - [ ] `auth()` gate is still in place; the only bypass is the dev `ALLOW_UNAUTHED_DEV` flag.
 - [ ] Errors return JSON, not throw — frontend expects shaped error responses.
 

@@ -142,6 +142,29 @@ function denyForEntity(
   };
 }
 
+// Turn an upstream/proxy error into something the model can act on instead of
+// blindly retrying. The #1 loop we've seen: P21 (OData v3) rejects a bad filter
+// with a cryptic "Syntax error at position N", the model repeats the IDENTICAL
+// call, and burns the whole step budget without ever answering. Attaching a
+// concrete hint + an explicit "don't retry unchanged" lets the model
+// self-correct (and pairs with the route's final-step synthesis safety net).
+// See TESTING.md § P21 for the date-literal gotcha this most often catches.
+function annotateViewError(result: unknown): unknown {
+  if (!result || typeof result !== "object" || !("error" in result)) return result;
+  const blob = JSON.stringify(result);
+  let hint =
+    "This query was rejected. Revise it before trying again — do NOT repeat the same call " +
+    "unchanged. Use describeView to confirm the view's column names and types.";
+  if (/syntax error/i.test(blob)) {
+    hint =
+      "OData v3 syntax error in the filter. Most common cause: a bare date — dates MUST be typed " +
+      "literals like datetime'2026-06-17T00:00:00', never a bare 2026-06-17. Also check that " +
+      "string values are single-quoted and every column name exists (describeView). Fix the " +
+      "filter; do NOT retry it unchanged.";
+  }
+  return { ...(result as Record<string, unknown>), hint };
+}
+
 function makeViewsQuery(scopes: EffectiveScopes, catalog: ScopeCatalog) {
   return tool({
   description:
@@ -197,7 +220,7 @@ function makeViewsQuery(scopes: EffectiveScopes, catalog: ScopeCatalog) {
       select: input.select,
       orderBy: input.orderBy,
     });
-    return result;
+    return annotateViewError(result);
   },
   });
 }
