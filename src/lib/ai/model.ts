@@ -4,11 +4,13 @@ import { createOpenAI } from "@ai-sdk/openai";
 type Provider = "anthropic" | "openai";
 
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
-// TEMPORARY: gpt-4o-mini while the OpenAI org verification for the gpt-5 family
-// is pending (gpt-5-mini requires a *verified* org; gpt-4o-mini does not).
-// Switch back to "gpt-5-mini" once verification clears. An OPENAI_MODEL env var
-// overrides this either way.
-const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+// TEMPORARY: gpt-4.1-mini while the OpenAI org verification for the gpt-5 family
+// is pending (gpt-5-mini requires a *verified* org; gpt-4.1-mini does not).
+// gpt-4.1-mini over gpt-4o-mini because 4o-mini looped on multi-step tool calls
+// (burned the step budget without answering); 4.1-mini is built for agentic
+// tool use. Switch back to "gpt-5-mini" once verification clears. An
+// OPENAI_MODEL env var overrides this either way.
+const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
 
 // Which provider the chat route talks to. Defaults to Anthropic so existing
 // deployments are untouched; set AI_PROVIDER=openai (plus OPENAI_API_KEY) to

@@ -27,7 +27,9 @@ const PRICING: Record<string, ModelPricing> = {
   "claude-haiku-4-5-20251001": { inputPerM: 1, cachedInputPerM: 0.1, outputPerM: 5 },
   // OpenAI — GPT-5 mini (cached input ≈ 10% of fresh input)
   "gpt-5-mini": { inputPerM: 0.25, cachedInputPerM: 0.025, outputPerM: 2 },
-  // OpenAI — GPT-4o mini (used only for non-gated smoke tests / fallback)
+  // OpenAI — GPT-4.1 mini (current default while gpt-5 verification is pending)
+  "gpt-4.1-mini": { inputPerM: 0.4, cachedInputPerM: 0.1, outputPerM: 1.6 },
+  // OpenAI — GPT-4o mini (non-gated smoke tests / fallback)
   "gpt-4o-mini": { inputPerM: 0.15, cachedInputPerM: 0.075, outputPerM: 0.6 },
 };
 

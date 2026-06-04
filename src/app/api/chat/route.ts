@@ -369,9 +369,18 @@ export async function POST(req: Request) {
     // chain (e.g. resolve location IDs, then transfers between them) → one or
     // two retries on filter syntax → final synthesis. Originally 8 (per
     // TESTING.md), tightened to 4 at some point — but with describeView in
-    // the loop the model legitimately needs more steps before answering, and
-    // hitting the cap means no final assistant text gets emitted.
+    // the loop the model legitimately needs more steps before answering.
     stopWhen: stepCountIs(10),
+    // Safety net against a blank reply: on the final allowed step, force the
+    // model to answer in text instead of calling yet another tool. Without
+    // this, a model that loops on tool calls (observed with gpt-4o-mini
+    // repeating one search 10×) burns the whole step budget and emits NO
+    // assistant text — the user sees tool calls and then nothing. Forcing
+    // toolChoice 'none' on the last step guarantees a synthesized reply from
+    // whatever results it has. Model-agnostic; harmless when the model
+    // finishes earlier on its own.
+    prepareStep: ({ stepNumber }) =>
+      stepNumber >= 9 ? { toolChoice: "none" } : {},
     abortSignal: req.signal,
     onError: ({ error }) => {
       console.error("[chat] stream error:", mapToFriendlyCode(error), error);
