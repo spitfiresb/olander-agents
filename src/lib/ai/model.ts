@@ -4,7 +4,11 @@ import { createOpenAI } from "@ai-sdk/openai";
 type Provider = "anthropic" | "openai";
 
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
-const DEFAULT_OPENAI_MODEL = "gpt-5-mini";
+// TEMPORARY: gpt-4o-mini while the OpenAI org verification for the gpt-5 family
+// is pending (gpt-5-mini requires a *verified* org; gpt-4o-mini does not).
+// Switch back to "gpt-5-mini" once verification clears. An OPENAI_MODEL env var
+// overrides this either way.
+const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
 
 // Which provider the chat route talks to. Defaults to Anthropic so existing
 // deployments are untouched; set AI_PROVIDER=openai (plus OPENAI_API_KEY) to
@@ -32,29 +36,34 @@ export function getModelId(): string {
 // above 0.4 has historically introduced "let me make sure I have this right…"
 // filler that reps don't need.
 //
-// OpenAI: GPT-5 are reasoning models that REJECT an explicit temperature (only
-// the default of 1 is allowed), so we omit it and get the same terseness from
-// `textVerbosity: 'low'`. `reasoningEffort: 'low'` buys enough chain-of-thought
-// for reliable multi-step tool selection — the failure mode we actually care
-// about — without paying for deep deliberation on what are mostly straight
-// lookups.
+// OpenAI splits into two families with OPPOSITE requirements:
+//   - GPT-5 (reasoning): REJECT an explicit temperature (only the default of 1
+//     is allowed), so we omit it and get terseness from `textVerbosity: 'low'`;
+//     `reasoningEffort: 'low'` buys enough chain-of-thought for reliable
+//     multi-step tool selection without deep deliberation on straight lookups.
+//   - gpt-4o-mini / gpt-4.1-mini (non-reasoning): the inverse — they TAKE a
+//     temperature and REJECT the reasoning/verbosity params. So branch on family.
 export function getGenerationParams(): {
   temperature: number | undefined;
   maxOutputTokens: number;
   providerOptions: Record<string, Record<string, string>> | undefined;
 } {
   if (resolveProvider() === "openai") {
-    return {
-      temperature: undefined,
-      // Reasoning tokens count against the output budget, so give more headroom
-      // than Anthropic's 2048 — a few hundred reasoning tokens shouldn't be able
-      // to truncate the visible answer. Still bounded to keep the long tail
-      // under the 60s edge-function timeout; raise here if real answers truncate.
-      maxOutputTokens: 4096,
-      providerOptions: {
-        openai: { reasoningEffort: "low", textVerbosity: "low" },
-      },
-    };
+    if (getModelId().startsWith("gpt-5")) {
+      return {
+        temperature: undefined,
+        // Reasoning tokens count against the output budget, so give more headroom
+        // than the 2048 below — a few hundred reasoning tokens shouldn't be able
+        // to truncate the visible answer. Still bounded to keep the long tail
+        // under the 60s edge-function timeout; raise here if real answers truncate.
+        maxOutputTokens: 4096,
+        providerOptions: {
+          openai: { reasoningEffort: "low", textVerbosity: "low" },
+        },
+      };
+    }
+    // Non-reasoning OpenAI models: temperature like Anthropic, no reasoning opts.
+    return { temperature: 0.2, maxOutputTokens: 2048, providerOptions: undefined };
   }
   return {
     temperature: 0.2,
