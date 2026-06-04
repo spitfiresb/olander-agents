@@ -152,7 +152,9 @@ function makeViewsQuery(scopes: EffectiveScopes, catalog: ScopeCatalog) {
     "p21_view_inv_loc (on-hand by location), p21_view_vendor (vendors). " +
     "Filter uses OData v3 syntax: eq, ne, gt/ge, lt/le, and, or, not, " +
     "startswith(field,'X'), endswith(field,'X'), substringof('X', field). " +
-    "Wrap string literals in single quotes. Use $select to project (views are 100+ columns; " +
+    "Wrap string literals in single quotes. Dates are typed literals: " +
+    "datetime'YYYY-MM-DDTHH:MM:SS' — a bare date like 2026-06-17 is a syntax error. " +
+    "Use $select to project (views are 100+ columns; " +
     "always select only what you need). Returns { rows: [...], count }; rows are snake_case " +
     "with JSON booleans, numbers parsed from numeric strings, ISO date strings, and null for nulls.",
   inputSchema: z.object({

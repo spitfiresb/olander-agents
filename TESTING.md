@@ -133,6 +133,7 @@ Update this file when a new class of regression bites us. Promote sections up th
 - [ ] Droplet health endpoint (`DROPLET_HEALTH_URL`) returns `p21_reachable.ok: true`.
 
 ### Things to watch for
+- **OData date literals** — P21 is OData **v3**: date filters MUST use typed literals `datetime'YYYY-MM-DDTHH:MM:SS'`. A bare `date_due le 2026-06-17` returns `502 / "Syntax error at position N"`. The system prompt + `viewsQuery` tool description teach this; if a model regresses to bare dates, every date-ranged query ("next 14 days", "shipping this week", "last 30 days") silently fails and the model loops retrying. A blank reply on a date query is the tell.
 - **the hosting provider IP allowlist** — the dev egress IP is `<proxy-ip>` (DO Reserved IP on droplet-1 / SFO2). If P21 starts rejecting, confirm the droplet is still routing via that IP.
 - **RFC1918 DNS override** — P21's public DNS resolves to a private IP. The droplet's `/etc/hosts` overrides this with `<p21-host-ip>`. If you rebuild the droplet, the override has to be re-applied (see `install.sh`).
 - **Proxy credentials** — `proxy-server.mjs` reads creds from env. Missing creds surface as `proxy_up.creds_present: false` in `/api/status`.
