@@ -2,6 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import { activeSession } from "@/auth";
 import { ChatShell } from "../ChatShell";
 import { loadMessages, getConversation } from "@/lib/conversations";
+import { getTrialBannerData } from "@/lib/trial";
 import type { UIMessage } from "ai";
 
 type Props = { params: Promise<{ id: string }> };
@@ -23,11 +24,14 @@ export default async function ConversationPage({ params }: Props) {
     parts: row.parts as UIMessage["parts"],
   }));
 
+  const trial = await getTrialBannerData();
+
   return (
     <ChatShell
       initialConversationId={id}
       initialMessages={initialMessages}
       isAdmin={session.user.role === "admin"}
+      trial={trial}
     />
   );
 }

@@ -59,6 +59,8 @@ type Props = {
 
 function friendlyErrorMessage(error: Error): string {
   const msg = error.message ?? "";
+  if (msg.includes("trial_limit_reached"))
+    return "This trial has reached its usage limit. To keep going, your account needs to move to full billing — please reach out to continue.";
   if (msg.includes("server_misconfigured"))
     return "AI service isn't configured yet. Please contact your admin.";
   if (msg.includes("provider_auth"))

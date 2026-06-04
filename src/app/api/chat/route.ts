@@ -1,16 +1,13 @@
 import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from "ai";
 import { z } from "zod";
 import { activeSession } from "@/auth";
-import {
-  getModel,
-  MODEL_MAX_OUTPUT_TOKENS,
-  MODEL_TEMPERATURE,
-} from "@/lib/ai/model";
+import { getGenerationParams, getModel, getModelId } from "@/lib/ai/model";
 import { SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
 import { buildTools } from "@/lib/ai/tools";
 import { isExcelMimeType, ownsAttachmentUrl } from "@/lib/blob";
 import { fetchAndConvertExcel } from "@/lib/excel";
 import { effectiveScopes, loadScopeCatalog } from "@/lib/scopes";
+import { getTrialStatus } from "@/lib/trial";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { isSameOrigin } from "@/lib/csrf";
 import {
@@ -190,6 +187,20 @@ export async function POST(req: Request) {
     );
   }
 
+  // TEMPORARY trial spend gate. Deployment-wide, hard-stops EVERYONE (admins
+  // included) once estimated spend crosses the limit. Admins manage/disable it
+  // from /admin/trial, which is not gated. Fail-open on a DB hiccup — a billing
+  // estimate must never take the whole chat down. Remove this block when the
+  // trial gate is retired (see schema.ts `trialBudget`).
+  try {
+    const trial = await getTrialStatus();
+    if (trial.exhausted) {
+      return Response.json({ error: "trial_limit_reached" }, { status: 402 });
+    }
+  } catch (err) {
+    console.error("[chat] trial gate check failed (failing open):", err);
+  }
+
   let raw: unknown;
   try {
     raw = await req.json();
@@ -325,12 +336,16 @@ export async function POST(req: Request) {
     day: "2-digit",
   }).format(new Date());
 
+  const gen = getGenerationParams();
+
   const result = streamText({
     model,
     // SystemModelMessage form lets us mark the prompt for Anthropic's
     // ephemeral prompt cache. The system prompt + tool definitions are
     // stable across turns; caching them drops cost ~90% on cached input
     // tokens and shaves measurable latency off every turn after the first.
+    // The marker is namespaced under `anthropic`, so OpenAI ignores it —
+    // GPT-5 does prefix caching automatically with no marker needed.
     system: {
       role: "system",
       content:
@@ -345,8 +360,11 @@ export async function POST(req: Request) {
     },
     messages: await convertToModelMessages(modelFacingMessages as UIMessage[]),
     tools: buildTools(scopes, scopeCatalog),
-    temperature: MODEL_TEMPERATURE,
-    maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS,
+    // Provider-specific: temperature/verbosity/reasoning differ between
+    // Anthropic and GPT-5. See getGenerationParams in lib/ai/model.ts.
+    temperature: gen.temperature,
+    maxOutputTokens: gen.maxOutputTokens,
+    providerOptions: gen.providerOptions,
     // 10 steps = enough headroom for: describeView → multi-step viewsQuery
     // chain (e.g. resolve location IDs, then transfers between them) → one or
     // two retries on filter syntax → final synthesis. Originally 8 (per
@@ -392,7 +410,7 @@ export async function POST(req: Request) {
           {
             role: "assistant",
             parts: responseMessage.parts,
-            model: process.env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-4-6",
+            model: getModelId(),
             usage: {
               inputTokens: usage.inputTokens,
               outputTokens: usage.outputTokens,

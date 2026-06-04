@@ -173,6 +173,26 @@ export const messages = pgTable(
   ],
 );
 
+// TEMPORARY trial spend gate. A single-row ("singleton") table holding the
+// deployment-wide trial budget. /api/chat hard-stops for EVERYONE — admins
+// included — once estimated spend (priced per-model from message usage) crosses
+// `limit_cents`. The admin panel stays reachable so an admin can raise the
+// limit or flip `enabled` off without being locked out.
+//
+// Built to be ripped out when the client moves to real billing. To remove the
+// whole feature: drop this table, delete src/lib/trial.ts and src/app/admin/trial,
+// remove the TrialBanner usage in ChatShell and the gate block in the chat
+// route. The migration seeds the singleton row (id = 'singleton', $10, enabled).
+export const trialBudget = pgTable("trial_budget", {
+  id: text("id").primaryKey().default("singleton"),
+  enabled: boolean("enabled").notNull().default(true),
+  limitCents: integer("limit_cents").notNull().default(1000),
+  updatedAt: timestamp("updatedAt", { mode: "date", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedBy: text("updatedBy"),
+});
+
 // Catalog row metadata — one row per inv_mast_uid mirroring p21_view_inv_mast.
 // The actual vector lives in Qdrant (see src/lib/ai/qdrant.ts) keyed on the
 // same inv_mast_uid. This table carries:

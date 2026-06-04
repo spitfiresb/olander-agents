@@ -409,10 +409,13 @@ export async function exportConversationMarkdown(
 // Daily token/usage rollup for /admin/usage. Sum across users; the route is
 // admin-gated and intended for spend monitoring, not per-user analytics.
 export async function dailyUsage(daysBack = 30) {
-  // Group by date(createdAt) in postgres so we don't pull every row to JS.
+  // Group by date(createdAt) AND model in postgres so the caller can price each
+  // bucket at its own per-model rate (a day can mix Sonnet + GPT-5 turns). The
+  // caller rolls the per-model rows up into per-day totals.
   return db
     .select({
       day: sql<string>`to_char(${messages.createdAt}, 'YYYY-MM-DD')`,
+      model: messages.model,
       messages: sql<number>`count(*)`.mapWith(Number),
       inputTokens: sql<number>`coalesce(sum((${messages.usage}->>'inputTokens')::int), 0)`.mapWith(
         Number,
@@ -426,6 +429,6 @@ export async function dailyUsage(daysBack = 30) {
     })
     .from(messages)
     .where(sql`${messages.createdAt} >= now() - (${daysBack} || ' days')::interval`)
-    .groupBy(sql`to_char(${messages.createdAt}, 'YYYY-MM-DD')`)
+    .groupBy(sql`to_char(${messages.createdAt}, 'YYYY-MM-DD')`, messages.model)
     .orderBy(sql`to_char(${messages.createdAt}, 'YYYY-MM-DD') desc`);
 }

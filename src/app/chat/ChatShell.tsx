@@ -14,6 +14,7 @@ import { HamburgerIcon } from "@/components/icons";
 import { Wordmark } from "@/components/Wordmark";
 import { ChatHeader } from "./ChatHeader";
 import { Composer, type ComposerAttachment } from "./Composer";
+import { TrialBanner, TrialBlocked, type TrialBannerData } from "./TrialBanner";
 import { MessageList } from "./MessageList";
 import { MobileSidebarDrawer } from "./MobileSidebarDrawer";
 import { ShortcutsOverlay } from "./ShortcutsOverlay";
@@ -44,9 +45,12 @@ type Props = {
   initialConversationId?: string;
   initialMessages?: UIMessage[];
   isAdmin?: boolean;
+  // TEMPORARY trial gate (src/lib/trial.ts). Undefined when the feature is
+  // retired/disabled — then neither the banner nor the blocked panel renders.
+  trial?: TrialBannerData;
 };
 
-export function ChatShell({ initialConversationId, initialMessages, isAdmin }: Props) {
+export function ChatShell({ initialConversationId, initialMessages, isAdmin, trial }: Props) {
   const router = useRouter();
   // Lives outside React state so the transport's body callback (which fires
   // outside the React render path) can read the current id without a
@@ -647,6 +651,7 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
         </header>
 
         <main className="flex min-h-0 flex-1 flex-col">
+          {trial?.enabled && !trial.exhausted && <TrialBanner trial={trial} />}
           {attachmentBanner && (
             <div className="mx-auto mt-2 max-w-3xl rounded-lg border border-brand-red/30 bg-brand-red/5 px-4 py-2 text-xs text-brand-charcoal">
               {attachmentBanner}
@@ -660,18 +665,22 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin }: P
             onSelectFollowUp={selectFollowUp}
             onEditAndResend={onEditAndResend}
           />
-          <Composer
-            input={input}
-            setInput={setInput}
-            status={status}
-            error={error}
-            attachments={attachments}
-            onAddFiles={addFiles}
-            onRemoveAttachment={(id) => void removeAttachment(id)}
-            onSubmit={() => void submitMessage()}
-            onStop={stop}
-            onRegenerate={() => regenerate()}
-          />
+          {trial?.enabled && trial.exhausted ? (
+            <TrialBlocked trial={trial} />
+          ) : (
+            <Composer
+              input={input}
+              setInput={setInput}
+              status={status}
+              error={error}
+              attachments={attachments}
+              onAddFiles={addFiles}
+              onRemoveAttachment={(id) => void removeAttachment(id)}
+              onSubmit={() => void submitMessage()}
+              onStop={stop}
+              onRegenerate={() => regenerate()}
+            />
+          )}
         </main>
 
         {/* Full-surface drop overlay (Claude.ai style). Covers the main
