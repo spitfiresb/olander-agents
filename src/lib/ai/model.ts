@@ -1,34 +1,39 @@
 import { anthropic, createAnthropic } from "@ai-sdk/anthropic";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 
-type Provider = "anthropic" | "openai";
+type Provider = "anthropic" | "openai" | "google";
 
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
-// TEMPORARY: gpt-4.1-mini while the OpenAI org verification for the gpt-5 family
-// is pending (gpt-5-mini requires a *verified* org; gpt-4.1-mini does not).
-// gpt-4.1-mini over gpt-4o-mini because 4o-mini looped on multi-step tool calls
+// gpt-4.1-mini: non-gated (no org/KYC verification), unlike the gpt-5 family.
+// Chosen over gpt-4o-mini because 4o-mini looped on multi-step tool calls
 // (burned the step budget without answering); 4.1-mini is built for agentic
-// tool use. Switch back to "gpt-5-mini" once verification clears. An
-// OPENAI_MODEL env var overrides this either way.
+// tool use. Overridable with OPENAI_MODEL.
 const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
+// Gemini Flash: also non-gated (no KYC). Under evaluation against gpt-4.1-mini
+// via `npm run eval`. gemini-2.5-flash is the tool-capable baseline; override
+// with GOOGLE_MODEL (e.g. gemini-2.5-flash-lite for the cheaper tier).
+const DEFAULT_GOOGLE_MODEL = "gemini-2.5-flash";
 
 // Which provider the chat route talks to. Defaults to Anthropic so existing
 // deployments are untouched; set AI_PROVIDER=openai (plus OPENAI_API_KEY) to
 // run GPT-5 mini. The whole point of routing through here is to A/B a cheaper
 // model behind a single env var with no code change.
 function resolveProvider(): Provider {
-  return process.env.AI_PROVIDER?.trim().toLowerCase() === "openai"
-    ? "openai"
-    : "anthropic";
+  const p = process.env.AI_PROVIDER?.trim().toLowerCase();
+  if (p === "openai") return "openai";
+  if (p === "google") return "google";
+  return "anthropic";
 }
 
 // The active model id — used both to construct the model and to stamp the
 // `model` column on persisted assistant messages so history stays accurate
 // across a provider switch.
 export function getModelId(): string {
-  return resolveProvider() === "openai"
-    ? process.env.OPENAI_MODEL?.trim() || DEFAULT_OPENAI_MODEL
-    : process.env.ANTHROPIC_MODEL?.trim() || DEFAULT_ANTHROPIC_MODEL;
+  const provider = resolveProvider();
+  if (provider === "openai") return process.env.OPENAI_MODEL?.trim() || DEFAULT_OPENAI_MODEL;
+  if (provider === "google") return process.env.GOOGLE_MODEL?.trim() || DEFAULT_GOOGLE_MODEL;
+  return process.env.ANTHROPIC_MODEL?.trim() || DEFAULT_ANTHROPIC_MODEL;
 }
 
 // Per-provider generation settings, spread into streamText so the route stays
@@ -66,6 +71,13 @@ export function getGenerationParams(): {
     }
     // Non-reasoning OpenAI models: temperature like Anthropic, no reasoning opts.
     return { temperature: 0.2, maxOutputTokens: 2048, providerOptions: undefined };
+  }
+  if (resolveProvider() === "google") {
+    // Gemini takes a temperature and ignores the OpenAI-specific params. 2.5
+    // Flash "thinks" by default and thinking tokens count toward the output
+    // budget, so give the same headroom as the reasoning path to avoid
+    // truncating the visible answer.
+    return { temperature: 0.2, maxOutputTokens: 4096, providerOptions: undefined };
   }
   return {
     temperature: 0.2,
@@ -132,6 +144,14 @@ export function getModel() {
     // Default factory routes GPT-5 through the Responses API, which handles
     // reasoning output and reports cached/reasoning token counts via usage.
     return createOpenAI({ apiKey })(getModelId());
+  }
+
+  if (resolveProvider() === "google") {
+    const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
+    if (!apiKey) {
+      throw new Error("GOOGLE_GENERATIVE_AI_API_KEY is not set");
+    }
+    return createGoogleGenerativeAI({ apiKey })(getModelId());
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
