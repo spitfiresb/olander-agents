@@ -14,7 +14,7 @@ import { HamburgerIcon } from "@/components/icons";
 import { Wordmark } from "@/components/Wordmark";
 import { ChatHeader } from "./ChatHeader";
 import { Composer, type ComposerAttachment } from "./Composer";
-import { TrialBanner, TrialBlocked, type TrialBannerData } from "./TrialBanner";
+import { TrialBlocked, type TrialBannerData } from "./TrialBanner";
 import { MessageList } from "./MessageList";
 import { MobileSidebarDrawer } from "./MobileSidebarDrawer";
 import { ShortcutsOverlay } from "./ShortcutsOverlay";
@@ -651,7 +651,6 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin, tri
         </header>
 
         <main className="flex min-h-0 flex-1 flex-col">
-          {trial?.enabled && !trial.exhausted && <TrialBanner trial={trial} />}
           {attachmentBanner && (
             <div className="mx-auto mt-2 max-w-3xl rounded-lg border border-brand-red/30 bg-brand-red/5 px-4 py-2 text-xs text-brand-charcoal">
               {attachmentBanner}

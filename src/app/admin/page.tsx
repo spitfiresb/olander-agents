@@ -2,11 +2,15 @@ import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { BackLink } from "@/components/BackLink";
+import { getTrialStatus } from "@/lib/trial";
+import { TrialUsageSummary } from "./TrialUsageSummary";
 
 export default async function AdminPage() {
   const session = await auth();
   if (!session?.user) redirect("/");
   if (session.user.role !== "admin") notFound();
+
+  const trial = await getTrialStatus();
 
   return (
     <div className="min-h-dvh bg-brand-canvas">
@@ -18,7 +22,12 @@ export default async function AdminPage() {
           <code className="font-mono text-[12px]">admin</code> role.
         </p>
 
-        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+        {/* Trial spend, read-only at the top. Manage it under the card below. */}
+        <div className="mt-6">
+          <TrialUsageSummary trial={trial} />
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <Link
             href="/admin/audit"
             className="block rounded-2xl border border-brand-charcoal/10 bg-white p-5 transition-colors hover:border-brand-charcoal/30 hover:bg-brand-sand/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red"
