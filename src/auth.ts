@@ -26,12 +26,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   }),
   providers: [
     MicrosoftEntraID({
-      // Force the Microsoft account picker every time. Without this, Microsoft
-      // SSO silently returns whichever account the browser is already signed
-      // into — which often isn't the right tenant — and the user lands on
+      // Request only the OIDC sign-in scopes — no Microsoft Graph permissions.
+      // We only ever read the ID-token claims (`tid` for the tenant gate below,
+      // plus `email`), so `User.Read` bought us nothing but a profile photo —
+      // and it's a Graph *resource* permission, which is what triggers the
+      // "Need admin approval" gate for non-admin users in tenants that restrict
+      // consent to verified-publisher apps. Pure OIDC sign-in is user-
+      // consentable in those tenants. Dropping User.Read makes the provider's
+      // profile() photo fetch 403, so `image` falls back to null; sign-in is
+      // unaffected.
+      //
+      // `prompt: select_account` forces the Microsoft account picker every time.
+      // Without it, SSO silently returns whichever account the browser is
+      // already signed into — often the wrong tenant — and the user lands on
       // Auth.js's "Access Denied" page with no way to switch accounts.
       authorization: {
-        params: { scope: "openid profile email User.Read", prompt: "select_account" },
+        params: { scope: "openid profile email", prompt: "select_account" },
       },
     }),
   ],
