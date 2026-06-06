@@ -1,5 +1,6 @@
 // Read-only spend summary for the TEMPORARY trial gate (see src/lib/trial.ts).
-// Shown at the top of /admin and on /admin/trial. Pure render — no controls.
+// Shown at the top of /admin. Pure render — no controls (the limit is set
+// out-of-band; admins only watch what's left).
 
 const usd = (n: number) =>
   n.toLocaleString(undefined, {

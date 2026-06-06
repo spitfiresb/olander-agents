@@ -22,7 +22,8 @@ export default async function AdminPage() {
           <code className="font-mono text-[12px]">admin</code> role.
         </p>
 
-        {/* Trial spend, read-only at the top. Manage it under the card below. */}
+        {/* Trial spend, read-only. The limit is set outside the app — admins
+            can't change it here, only watch what's left. */}
         <div className="mt-6">
           <TrialUsageSummary trial={trial} />
         </div>
@@ -49,18 +50,6 @@ export default async function AdminPage() {
             </div>
             <div className="mt-1 text-sm text-brand-ink-soft">
               30-day token rollup and estimated Anthropic spend.
-            </div>
-          </Link>
-
-          <Link
-            href="/admin/trial"
-            className="block rounded-2xl border border-brand-charcoal/10 bg-white p-5 transition-colors hover:border-brand-charcoal/30 hover:bg-brand-sand/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red"
-          >
-            <div className="text-base font-medium text-brand-charcoal">
-              Trial spend gate
-            </div>
-            <div className="mt-1 text-sm text-brand-ink-soft">
-              Temporary $-cap that hard-stops chat for everyone. Set the limit or turn it off.
             </div>
           </Link>
 

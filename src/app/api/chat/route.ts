@@ -188,10 +188,10 @@ export async function POST(req: Request) {
   }
 
   // TEMPORARY trial spend gate. Deployment-wide, hard-stops EVERYONE (admins
-  // included) once estimated spend crosses the limit. Admins manage/disable it
-  // from /admin/trial, which is not gated. Fail-open on a DB hiccup — a billing
-  // estimate must never take the whole chat down. Remove this block when the
-  // trial gate is retired (see schema.ts `trialBudget`).
+  // included) once estimated spend crosses the limit. The limit is provisioned
+  // out-of-band (no in-app control to raise it or disable the gate). Fail-open
+  // on a DB hiccup — a billing estimate must never take the whole chat down.
+  // Remove this block when the trial gate is retired (see schema.ts `trialBudget`).
   try {
     const trial = await getTrialStatus();
     if (trial.exhausted) {

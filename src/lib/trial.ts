@@ -104,27 +104,6 @@ export async function getTrialBannerData() {
   }
 }
 
-// Upsert the singleton config. Used by the admin server actions only.
-export async function setTrialConfig(
-  patch: { enabled?: boolean; limitCents?: number },
-  updatedBy: string | null,
-): Promise<void> {
-  await db
-    .insert(trialBudget)
-    .values({
-      id: SINGLETON_ID,
-      enabled: patch.enabled ?? DEFAULTS.enabled,
-      limitCents: patch.limitCents ?? DEFAULTS.limitCents,
-      updatedBy,
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: trialBudget.id,
-      set: {
-        ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
-        ...(patch.limitCents !== undefined ? { limitCents: patch.limitCents } : {}),
-        updatedBy,
-        updatedAt: new Date(),
-      },
-    });
-}
+// No write path: the trial budget is provisioned out-of-band (the migration
+// seeds the singleton row) and the app only ever reads it. There is
+// deliberately no admin control to raise the limit or disable the gate.
