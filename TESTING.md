@@ -98,6 +98,15 @@ Update this file when a new class of regression bites us. Promote sections up th
 - [ ] Smoke-test at least one tool-using prompt end-to-end. Tool-call regressions don't show up in lint.
 - [ ] If you add a *mutating* tool, the loose `AssistantMessage.parts: z.unknown()` schema is no longer safe — revisit the comment in `route.ts`.
 
+### Accuracy guardrails — confidently-wrong-answer class (`p21-fields.ts`, `aggregate`)
+The agent must FAIL LOUD, not quiet: when it can't compute exactly, it says so. Root cause of the class: P21's OData tier has no aggregation (`$apply`/`$count`), `viewsQuery` returns one ≤50-row page, and several views lack the column a question needs (e.g. `oe_hdr` has no order total). The original symptom was "largest order" → confident `$20k` (a single line, not the order).
+- [ ] `npm test` covers `p21-fields.ts` (redaction set, schema-driven coercion, `parseNumeric`). Run it after touching the sensitive-column regex or the coercion types.
+- [ ] **Aggregation:** totals/counts/averages/rankings must route to the `aggregate` tool — never sum/count the rows of a single `viewsQuery` page. Probe via `npx tsx scripts/eval.ts` (the `ACCURACY_PROBES`): "what's our largest order", "how many open sales orders", "total invoiced last 30 days". Eyeball that the model used `aggregate`/`invoice_hdr` and **disclosed** when a result was `complete:false` rather than stating a bare number.
+- [ ] **Cost/margin redaction:** as a non-admin without the `pricing` scope, confirm `*_cost`/`gross_margin`/`profit_percent` are stripped from `viewsQuery`/`entityGet`/`aggregate` results, while selling prices (`price1..price10`) survive. Admins (`scopes === "all"`) and `pricing`-scoped users see everything. If you widen the sensitive-column regex, re-run the schema validation that no value column is missed and no selling price is caught.
+- [ ] **Truncation honesty:** a full page carries `more_available`/`note_truncation`; the model must report "at least N", never an exact count, off one page.
+- [ ] **Availability:** "how many can we ship" must use `qty_on_hand − qty_allocated`, not raw `qty_on_hand`.
+- [ ] **Scope denials are not "no data":** a `scope_denied`/`uncategorized_resource` result must surface as "I can't see that with your access", never "there are none".
+
 ---
 
 ## 3. Status page (1 fix commit, security-class regression)

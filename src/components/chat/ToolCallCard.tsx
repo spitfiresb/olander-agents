@@ -114,6 +114,9 @@ function DetailGrid({
     select?: string | string[];
     query?: string;
     topK?: number;
+    op?: string;
+    column?: string;
+    groupBy?: string;
   };
 
   const rows: Array<[string, string]> = [];
@@ -133,6 +136,12 @@ function DetailGrid({
   } else if (toolName === "searchCatalog") {
     if (i.query) rows.push(["Query", i.query]);
     if (i.topK != null) rows.push(["Top K", String(i.topK)]);
+  } else if (toolName === "aggregate") {
+    if (i.op) rows.push(["Operation", i.op]);
+    if (i.viewName) rows.push(["View", i.viewName]);
+    if (i.column) rows.push(["Column", i.column]);
+    if (i.groupBy) rows.push(["Group by", i.groupBy]);
+    if (filter) rows.push(["Filter", filter]);
   } else {
     try {
       rows.push(["Input", JSON.stringify(input)]);

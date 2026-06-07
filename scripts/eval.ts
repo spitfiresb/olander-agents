@@ -19,6 +19,23 @@ config({ path: ".env.local" });
 
 const STEP_CAP = 10;
 
+// Accuracy-regression probes — the question classes that used to return a
+// confident wrong number (the CEO's "$20k largest order"). These exercise the
+// aggregate tool + the "Accuracy guardrails" prompt rules end-to-end. Liveness
+// is the automated bar here too (a non-blank, grounded answer that didn't loop);
+// eyeball the previews to confirm the model routed to aggregate / invoice_hdr /
+// availability math and disclosed partial or access-limited results rather than
+// inventing a number. Kept separate from SUGGESTION_POOL so the demo chips stay
+// curated.
+const ACCURACY_PROBES = [
+  "What's our largest order?",
+  "What's our biggest invoice?",
+  "How many open sales orders do we have right now?",
+  "What did we invoice in total over the last 30 days?",
+  "Who are our top 5 customers by invoiced revenue?",
+  "How many of 31C100SHCS can we actually ship right now?",
+];
+
 const TODAY = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/Los_Angeles",
   year: "numeric",
@@ -100,7 +117,7 @@ async function main() {
   }
 
   const argv = process.argv.slice(2);
-  const queries = argv.length ? argv : [...SUGGESTION_POOL];
+  const queries = argv.length ? argv : [...SUGGESTION_POOL, ...ACCURACY_PROBES];
   console.log(`Eval — ${queries.length} queries on ${getModelId()} (today=${TODAY})\n`);
 
   const rows: Row[] = [];
