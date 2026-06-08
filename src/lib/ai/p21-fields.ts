@@ -28,14 +28,25 @@ export const PRICING_SCOPE = "pricing";
 // appear on customer-facing invoices anyway — those are NOT redacted here.
 //
 // Matched by name so it covers all 117 views uniformly, including the long tail.
-// Validated against data/p21-schema.json: catches moving_average_cost,
-// standard_cost, sales_cost, po_cost, other_cost, commission_cost, cogs_amount,
-// gross_margin, profit_percent, order_cost_basis, sku_cost, unit/extended_cost,
-// freight markups, … while leaving account-number / code / flag / date columns
-// (which carry no dollar value) and all selling prices alone.
-const SENSITIVE_NAME = /(^|_)(cost|cogs)(_|$)|gross_margin|profit_percent|profit_amount|margin_amount|markup/i;
+// Validated against data/p21-schema.json: catches every cost-basis column
+// (moving_average_cost, standard_cost, sales_cost, po_cost, other_cost,
+// commission_cost, …), COGS, and ALL dollar-margin / profit columns —
+// gross_margin, profit_percent, remote_margin (on ship_to), and the per-customer
+// maximum_/minimum_order_profit thresholds — plus order_cost_basis and freight
+// markups, while leaving account-number / code / flag / date columns (no dollar
+// value), profit-CONTROL flags (enable_/override_/skip_/*_check/*_warning), and
+// all selling prices (price1..price10, unit_price, extended_price) alone.
+//
+// Bare `margin`/`profit` are matched as whole segments (not just gross_margin /
+// profit_percent) so columns like remote_margin and maximum_order_profit — which
+// ride on default-on views (ship_to, customer) and previously leaked — are gated.
+// Name-only matching errs toward over-redaction (e.g. cost_center, a GL code)
+// rather than under-redaction: the safe-side bias for a confidentiality gate. If
+// you touch either regex, re-run the schema audit test that asserts no Decimal
+// value column matching cost/margin/profit slips through.
+const SENSITIVE_NAME = /(^|_)(cost|cogs|margin|profit)(_|$)|markup/i;
 const SENSITIVE_EXCLUDE =
-  /(_uid|_id|_no|_acct|_cd|_flag|_option|_method)$|^use_|^post_|^suppress_|_edited$|date|account/i;
+  /(_uid|_id|_no|_acct|_cd|_flag|_option|_method)$|^use_|^post_|^suppress_|^enable_|^override_|^skip_|^oe_skip_|_edited$|_warning$|_limit$|_check$|_uncosted$|_unpriced$|date|account/i;
 
 export function isSensitiveColumn(name: string): boolean {
   return SENSITIVE_NAME.test(name) && !SENSITIVE_EXCLUDE.test(name);

@@ -6,6 +6,7 @@ import {
   parseNumeric,
   redactSensitiveRows,
 } from "@/lib/ai/p21-fields";
+import p21Schema from "../../../../data/p21-schema.json";
 
 describe("isSensitiveColumn", () => {
   it("flags cost / margin columns", () => {
@@ -23,6 +24,13 @@ describe("isSensitiveColumn", () => {
       "sku_cost",
       "unit_cost",
       "extended_cost",
+      // bare *_margin / *_profit value columns that previously leaked on
+      // default-on views (ship_to, customer, product_group) — regression guard
+      "remote_margin",
+      "maximum_order_profit",
+      "minimum_order_profit",
+      "maximum_order_line_profit",
+      "minimum_order_line_profit",
     ]) {
       expect(isSensitiveColumn(c), c).toBe(true);
     }
@@ -52,9 +60,49 @@ describe("isSensitiveColumn", () => {
       "commission_cost_edited_flag",
       "cost_center_tracking_option",
       "landed_cost_included_cd",
+      // profit-CONTROL flags (String type) — config switches, not dollar values
+      "enable_line_profit_warning",
+      "override_profit_limit",
+      "skip_profit_exception_check",
+      "oe_skip_profit_check_unpriced",
     ]) {
       expect(isSensitiveColumn(c), c).toBe(false);
     }
+  });
+});
+
+// Data-driven guard against under-redaction: scan the bundled live schema and
+// assert that every Decimal column whose name carries a cost/margin/profit/cogs/
+// markup value (excluding *_id/_uid/_no reference columns) is redacted. This is
+// the regression net for the leak class — if P21 adds a new margin value column
+// on a default-on view, this fails loud instead of silently exposing it.
+describe("redaction covers the live schema (no value column slips through)", () => {
+  type Col = { name: string; type: string };
+  type View = { name: string; columns: Col[] };
+  const valuePattern = /(^|_)(cost|margin|profit|cogs)(_|$)|markup/i;
+  const refSuffix = /_(id|uid|no)$/i;
+
+  const seen = new Map<string, string>(); // name -> type
+  for (const v of p21Schema as View[]) {
+    for (const c of v.columns) if (!seen.has(c.name)) seen.set(c.name, c.type);
+  }
+  const valueCols = [...seen.entries()]
+    .filter(([n, t]) => t === "Decimal" && valuePattern.test(n) && !refSuffix.test(n))
+    .map(([n]) => n);
+
+  it("finds value columns to check (schema is loaded)", () => {
+    expect(valueCols.length).toBeGreaterThan(50);
+  });
+
+  it("redacts every cost/margin/profit Decimal value column", () => {
+    const missed = valueCols.filter((n) => !isSensitiveColumn(n));
+    expect(missed, `value columns left unredacted: ${missed.join(", ")}`).toEqual([]);
+  });
+
+  it("never redacts a selling-price column", () => {
+    const priceCols = [...seen.keys()].filter((n) => /(^|_)price\d*$|^price\d+$|unit_price|extended_price/i.test(n));
+    const wrongly = priceCols.filter((n) => isSensitiveColumn(n));
+    expect(wrongly, `selling prices wrongly redacted: ${wrongly.join(", ")}`).toEqual([]);
   });
 });
 

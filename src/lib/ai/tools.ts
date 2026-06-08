@@ -13,7 +13,6 @@ import {
   callerHasPricing,
   coerceRowsBySchema,
   isSensitiveColumn,
-  parseNumeric,
   PRICING_SCOPE,
   redactSensitiveRows,
 } from "@/lib/ai/p21-fields";
@@ -506,25 +505,24 @@ const SAFE_COLUMN = z
   .string()
   .regex(/^[a-z0-9_]+$/i, "column must be a bare column name");
 
-type AggAcc = { sum: number; n: number; min: number; max: number; count: number };
-
 function makeAggregate(scopes: EffectiveScopes, catalog: ScopeCatalog) {
   return tool({
     description:
       "Compute a real SUM / COUNT / AVG / MIN / MAX over a P21 view, optionally " +
-      "grouped — the ONLY correct way to answer total / count / average / " +
-      "ranking questions, because viewsQuery returns at most one capped page. " +
-      "Use it for: 'total sales this month' (op:sum, column:total_amount on " +
-      "p21_view_invoice_hdr, with a date filter), 'how many open orders' " +
-      "(op:count on p21_view_oe_hdr), 'biggest order by line value' (op:sum, " +
-      "column:extended_price, groupBy:order_no on p21_view_oe_line, top:1), " +
-      "'top customers by spend' (op:sum, column:total_amount, groupBy:customer_id " +
-      "on p21_view_invoice_hdr). It pages the view server-side and folds the " +
-      "rows. Returns { op, value | groups:[{key,value,n}], rows_scanned, " +
-      "complete }. IF complete is false the scan hit its budget — the value is a " +
-      "LOWER BOUND and rankings are approximate; you MUST tell the user the " +
-      "figure is partial and suggest a tighter filter for an exact number. " +
-      "Cost/margin columns require the pricing scope.",
+      "grouped — the correct way to answer total / count / average / ranking " +
+      "questions. Runs server-side on the droplet next to P21: COUNT is EXACT " +
+      "via $inlinecount (no scan), MIN/MAX EXACT via orderby+top (no scan), and " +
+      "SUM/AVG/grouped fold big pages in one hop. Use it for: 'how many open " +
+      "orders' (op:count on p21_view_oe_hdr), 'total sales this month' (op:sum, " +
+      "column:total_amount on p21_view_invoice_hdr + a date filter), 'biggest " +
+      "order by line value' (op:sum, column:extended_price, groupBy:order_no on " +
+      "p21_view_oe_line, top:1), 'top customers by spend' (op:sum, " +
+      "column:total_amount, groupBy:customer_id on p21_view_invoice_hdr). Returns " +
+      "{ op, value | groups:[{key,value,n}], total_count, rows_scanned, complete }. " +
+      "complete:true means the figure is EXACT — state it plainly, no hedging. " +
+      "complete:false means the scan hit its budget and covers rows_scanned of " +
+      "total_count — report it as a sample of that size and offer a tighter " +
+      "filter; never present it as exact. Cost/margin columns need the pricing scope.",
     inputSchema: z.object({
       viewName: z
         .string()
@@ -576,134 +574,50 @@ function makeAggregate(scopes: EffectiveScopes, catalog: ScopeCatalog) {
         }
       }
 
-      const PAGE = 200;
-      const MAX_PAGES = 10; // ≤2000 rows scanned — bounded wall-clock
-      const TIME_BUDGET_MS = 18_000;
-      const projection = [input.groupBy, input.column].filter(
-        (c): c is string => Boolean(c),
+      // The fold runs on the droplet (one hop from P21), not here. We hand off
+      // op/column/filter/groupBy plus a STABLE sort key — the view's key (UID)
+      // column — which the proxy needs for safe $skip paging (docs §Pagination).
+      // COUNT comes back exact via $inlinecount and MIN/MAX exact via
+      // orderby+top, with no scan at all; SUM/AVG/grouped are folded over big
+      // pages and return total_count so coverage is exact, not guessed.
+      const view = getViewSchema(input.viewName);
+      const keyCol =
+        view?.columns.find((c) => c.key)?.name ?? view?.columns[0]?.name;
+
+      const res = await callProxy(
+        "POST",
+        `/proxy/aggregate/${encodeURIComponent(input.viewName)}`,
+        {
+          op: input.op,
+          column: input.column,
+          filter: input.filter,
+          groupBy: input.groupBy,
+          orderBy: keyCol,
+          top: input.top,
+        },
       );
-      if (projection.length === 0) {
-        // op:count with no column/group still needs a MINIMAL projection —
-        // without one the proxy returns full wide rows, the 100KB cap trims the
-        // page below PAGE, and "rows.length < PAGE" would falsely read as
-        // "exhausted" → an undercount reported as exact. Project the key column.
-        const view = getViewSchema(input.viewName);
-        const keyCol =
-          view?.columns.find((c) => c.key)?.name ?? view?.columns[0]?.name;
-        if (keyCol) projection.push(keyCol);
+      if (!res || typeof res !== "object" || "error" in res) {
+        return annotateViewError(res);
       }
-      const start = Date.now();
-      let skip = 0;
-      let scanned = 0;
-      let complete = false;
-      let errored: unknown = null;
 
-      const fresh = (): AggAcc => ({ sum: 0, n: 0, min: Infinity, max: -Infinity, count: 0 });
-      const grouped = new Map<string, AggAcc>();
-      const ungrouped = fresh();
-      const accumulate = (acc: AggAcc, val: number | null) => {
-        acc.count++;
-        if (val !== null) {
-          acc.sum += val;
-          acc.n++;
-          if (val < acc.min) acc.min = val;
-          if (val > acc.max) acc.max = val;
-        }
+      const out = res as Record<string, unknown> & {
+        complete?: boolean;
+        rows_scanned?: number;
+        total_count?: number | null;
       };
-
-      for (let page = 0; page < MAX_PAGES; page++) {
-        const res = await callProxy(
-          "POST",
-          `/proxy/views/${encodeURIComponent(input.viewName)}`,
-          {
-            filter: input.filter,
-            top: PAGE,
-            skip,
-            select: projection.length ? projection : undefined,
-          },
-        );
-        if (!res || typeof res !== "object" || "error" in res) {
-          errored = res;
-          break;
-        }
-        const rows = (res as { rows?: unknown }).rows;
-        if (!Array.isArray(rows)) {
-          errored = res;
-          break;
-        }
-        for (const row of rows as Record<string, unknown>[]) {
-          const val = input.column ? parseNumeric(row[input.column]) : null;
-          if (input.groupBy) {
-            const key = String(row[input.groupBy] ?? "(null)");
-            let acc = grouped.get(key);
-            if (!acc) {
-              acc = fresh();
-              grouped.set(key, acc);
-            }
-            accumulate(acc, val);
-          } else {
-            accumulate(ungrouped, val);
-          }
-        }
-        scanned += rows.length;
-        // A byte-trimmed page means rows.length is no longer a reliable
-        // exhaustion signal, and skipping past it would miss the un-returned
-        // rows — stop and report partial rather than undercount.
-        if ((res as { payload_truncated?: boolean }).payload_truncated) break;
-        if (rows.length < PAGE) {
-          complete = true; // exhausted the matching rows
-          break;
-        }
-        skip += PAGE;
-        if (Date.now() - start > TIME_BUDGET_MS) break; // complete stays false
+      // Honest coverage: $inlinecount gives the exact population, so a partial
+      // scan reports "X of Y", never a vague "lower bound of unknown size".
+      if (out.complete === false) {
+        const scanned = typeof out.rows_scanned === "number" ? out.rows_scanned : 0;
+        const total = typeof out.total_count === "number" ? out.total_count : null;
+        const pct = total ? ` (~${Math.round((scanned / total) * 100)}%)` : "";
+        out.note =
+          `Partial — scanned ${scanned.toLocaleString()}${total ? ` of ${total.toLocaleString()}` : ""} rows${pct} ` +
+          `before the scan budget. Treat the value as a LOWER BOUND and any ranking as approximate; tell the ` +
+          `user it's based on a sample of that size and offer a tighter filter (e.g. a narrower date range) for ` +
+          `an exact figure.`;
       }
-
-      if (errored) return annotateViewError(errored);
-
-      const reduce = (acc: AggAcc): number | null => {
-        switch (input.op) {
-          case "count":
-            return acc.count;
-          case "sum":
-            return acc.sum;
-          case "avg":
-            return acc.n ? acc.sum / acc.n : null;
-          case "min":
-            return acc.n ? acc.min : null;
-          case "max":
-            return acc.n ? acc.max : null;
-          default:
-            return null;
-        }
-      };
-
-      const base: Record<string, unknown> = {
-        op: input.op,
-        column: input.column,
-        filter: input.filter,
-        rows_scanned: scanned,
-        complete,
-      };
-      if (!complete) {
-        base.note =
-          `Partial — scanned only the first ${scanned} matching rows (scan budget reached). ` +
-          `Treat sums/counts as a LOWER BOUND and any ranking as approximate. Tell the user ` +
-          `this is based on a sample, not the full dataset, and suggest a tighter filter ` +
-          `(e.g. a narrower date range) for an exact figure.`;
-      }
-      if (input.groupBy) {
-        const topN = input.top ?? 10;
-        base.groupBy = input.groupBy;
-        base.group_count = grouped.size;
-        base.groups = [...grouped.entries()]
-          .map(([key, acc]) => ({ key, value: reduce(acc), n: acc.count }))
-          .filter((x) => x.value !== null)
-          .sort((a, b) => (b.value as number) - (a.value as number))
-          .slice(0, topN);
-      } else {
-        base.value = reduce(ungrouped);
-      }
-      return base;
+      return out;
     },
   });
 }
