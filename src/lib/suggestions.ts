@@ -13,8 +13,14 @@
 //     P21's most-recent activity in our test dataset trails the calendar by
 //     1-2 weeks, so narrower windows risked 0-row results.
 //
-// No aggregation-only prompts (viewsQuery has no $apply/groupby).
-// No price-bearing prompts (the `pricing` scope is opt-in for non-admins).
+// Aggregation questions (totals/counts/rankings) are answerable via the
+// `aggregate` tool — COUNT and MIN/MAX come back exact (server-side, no scan),
+// SUM/AVG exact for any bounded population and disclosed-coverage for the full-
+// history tail. Kept OUT of these demo chips anyway: the all-time ones can
+// return a partial sample, which doesn't make for a crisp one-click demo. The
+// eval exercises the aggregate path via ACCURACY_PROBES in scripts/eval.ts
+// instead. No cost/margin prompts here — those columns require the opt-in
+// `pricing` scope and are redacted for non-admins.
 export const SUGGESTION_POOL = [
   "What size helicoil goes in a 3/8-16 hole?",
   "Do we have any M10 1.25 socket head cap screws in stock?",

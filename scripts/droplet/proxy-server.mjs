@@ -517,6 +517,177 @@ async function handleViewsQuery(viewName, body) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Aggregation — server-side SUM / COUNT / AVG / MIN / MAX (+ optional GROUP BY).
+//
+// P21's OData v3 tier has no $apply, but it DOES support the two operators that
+// matter here, both verified live:
+//   - $inlinecount=allpages → the EXACT total row count in one request (COUNT).
+//   - $orderby + $top=1      → the EXACT extreme in one request (MIN / MAX).
+// For SUM / AVG / grouped rankings there's no server-side fold, so we page the
+// view HERE on the droplet — one hop from P21, big pages ($top=2000), gentle
+// bounded concurrency — and fold the rows. Measured ~2000 rows / 150ms per
+// connection, so the whole population is reachable in seconds, where the
+// Vercel-side per-page loop (≈600 internet round-trips) had to cap at ~2000
+// rows. $inlinecount gives the exact population up front, so we return
+// `total_count` + `complete` and the caller states exact coverage instead of a
+// vague "partial". Bounded by a row/time budget to stay gentle on the shared
+// ERP and within the 512MB box.
+//
+// Scope + cost/margin redaction are enforced in the APP layer (tools.ts) before
+// this is ever called — same trust boundary as /proxy/views.
+// ---------------------------------------------------------------------------
+
+const AGG_PAGE = 2000; // P21 honors large pages; one projected column keeps each tiny
+const AGG_CONCURRENCY = 6; // gentle on the shared dev ERP — 6 in flight, not hundreds
+const AGG_TIME_BUDGET_MS = 18_000; // < the app's 25s proxy timeout, leaves margin
+const AGG_MAX_ROWS = 300_000; // hard ceiling on a 512MB box (~150 pages)
+const AGG_COL_RE = /^[a-z0-9_]+$/i;
+const AGG_ORDER_RE = /^[a-z0-9_]+(\s+(asc|desc))?$/i;
+
+function aggNum(v) {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === "number" ? v : Number(String(v).replace(/,/g, "").trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+function aggReduce(op, acc) {
+  switch (op) {
+    case "count": return acc.count;
+    case "sum": return acc.sum;
+    case "avg": return acc.n ? acc.sum / acc.n : null;
+    case "min": return acc.n ? acc.min : null;
+    case "max": return acc.n ? acc.max : null;
+    default: return null;
+  }
+}
+
+async function handleAggregate(viewName, body) {
+  if (!VIEW_NAME_RE.test(viewName)) {
+    return { status: 400, body: { error: "bad_view_name", detail: "view name must match p21_view_*" } };
+  }
+  const { op, column, filter, groupBy, orderBy, top } = body ?? {};
+  if (!["count", "sum", "avg", "min", "max"].includes(op)) {
+    return { status: 400, body: { error: "bad_request", detail: "op must be sum|count|avg|min|max" } };
+  }
+  if (column != null && !AGG_COL_RE.test(String(column))) return { status: 400, body: { error: "bad_column" } };
+  if (groupBy != null && !AGG_COL_RE.test(String(groupBy))) return { status: 400, body: { error: "bad_groupby" } };
+  if (orderBy != null && !AGG_ORDER_RE.test(String(orderBy))) return { status: 400, body: { error: "bad_orderby" } };
+  if (op !== "count" && !column) {
+    return { status: 400, body: { error: "bad_request", detail: `op ${op} needs a numeric column` } };
+  }
+  const flt = typeof filter === "string" && filter ? filter : undefined;
+  const topN = Math.min(Math.max(1, parseInt(top, 10) || 10), 100);
+  const base = `/data/erp/views/v1/${viewName}`;
+
+  try {
+    // --- exact COUNT, no scan: $inlinecount=allpages ---
+    if (op === "count" && !groupBy) {
+      const data = await p21Fetch(base, {
+        searchParams: { "$top": 1, "$inlinecount": "allpages", "$filter": flt, "$select": column || orderBy || undefined },
+      });
+      const c = Number(data?.["odata.count"]);
+      const ok = Number.isFinite(c);
+      return { status: 200, body: { op, value: ok ? c : null, total_count: ok ? c : null, rows_scanned: 0, complete: ok } };
+    }
+
+    // --- exact MIN / MAX, no scan: $orderby <col> <dir> & $top=1 ---
+    if ((op === "min" || op === "max") && !groupBy) {
+      const dir = op === "max" ? "desc" : "asc";
+      const data = await p21Fetch(base, {
+        searchParams: { "$top": 1, "$orderby": `${column} ${dir}`, "$filter": flt, "$select": column },
+      });
+      const row = Array.isArray(data?.value) ? data.value[0] : undefined;
+      return { status: 200, body: { op, column, value: row ? aggNum(row[column]) : null, rows_scanned: row ? 1 : 0, complete: true } };
+    }
+
+    // --- scan path: sum / avg / grouped. Page big, fold here, bounded. ---
+    const projection = [groupBy, column].filter(Boolean);
+    // A stable sort key is required for $skip paging (docs §Pagination). The app
+    // passes the view's key column as orderBy; fall back to a projected column.
+    const sortKey = typeof orderBy === "string" && orderBy ? orderBy : groupBy || column;
+
+    // Exact population up front → drives page count + honest coverage.
+    let total = null;
+    {
+      const ic = await p21Fetch(base, {
+        searchParams: { "$top": 1, "$inlinecount": "allpages", "$filter": flt, "$select": projection[0] },
+      });
+      const c = Number(ic?.["odata.count"]);
+      total = Number.isFinite(c) ? c : null;
+    }
+    const targetRows = total != null ? Math.min(total, AGG_MAX_ROWS) : AGG_MAX_ROWS;
+    const nPages = Math.ceil(targetRows / AGG_PAGE);
+
+    const fresh = () => ({ sum: 0, n: 0, min: Infinity, max: -Infinity, count: 0 });
+    const groups = new Map();
+    const ungrouped = fresh();
+    const bump = (acc, val) => {
+      acc.count++;
+      if (val !== null) {
+        acc.sum += val; acc.n++;
+        if (val < acc.min) acc.min = val;
+        if (val > acc.max) acc.max = val;
+      }
+    };
+
+    const start = nowMs();
+    let scanned = 0, timedOut = false, exhausted = false, errored = null, page = 0;
+    while (page < nPages) {
+      const wave = [];
+      for (let k = 0; k < AGG_CONCURRENCY && page < nPages; k++, page++) {
+        wave.push(
+          p21Fetch(base, {
+            searchParams: { "$top": AGG_PAGE, "$skip": page * AGG_PAGE, "$orderby": sortKey, "$filter": flt, "$select": projection.join(",") },
+          }),
+        );
+      }
+      let results;
+      try { results = await Promise.all(wave); }
+      catch (e) { errored = e; break; }
+      for (const data of results) {
+        const rows = Array.isArray(data?.value) ? data.value : [];
+        for (const row of rows) {
+          const val = column ? aggNum(row[column]) : null;
+          if (groupBy) {
+            const key = row[groupBy] == null ? "(null)" : String(row[groupBy]);
+            let acc = groups.get(key);
+            if (!acc) { acc = fresh(); groups.set(key, acc); }
+            bump(acc, val);
+          } else {
+            bump(ungrouped, val);
+          }
+        }
+        scanned += rows.length;
+        if (rows.length < AGG_PAGE) exhausted = true; // reached the tail
+      }
+      if (exhausted) break;
+      if (nowMs() - start > AGG_TIME_BUDGET_MS) { timedOut = true; break; }
+    }
+    if (errored) return mapError(errored);
+
+    // Complete iff we covered the whole population: known total within the cap
+    // and not timed out, or (unknown total) we hit a short tail page.
+    const complete = !timedOut && (total != null ? total <= AGG_MAX_ROWS : exhausted);
+
+    const out = { op, column, total_count: total, rows_scanned: scanned, complete };
+    if (groupBy) {
+      out.groupBy = groupBy;
+      out.group_count = groups.size;
+      out.groups = [...groups.entries()]
+        .map(([key, acc]) => ({ key, value: aggReduce(op, acc), n: acc.count }))
+        .filter((x) => x.value !== null)
+        .sort((a, b) => b.value - a.value)
+        .slice(0, topN);
+    } else {
+      out.value = aggReduce(op, ungrouped);
+    }
+    return { status: 200, body: out };
+  } catch (e) {
+    return mapError(e);
+  }
+}
+
 async function handleEntityGet(area, resource, id, extendedProperties) {
   if (!AREA_RE.test(area)) {
     return { status: 400, body: { error: "bad_area" } };
@@ -643,6 +814,32 @@ const server = createServer(async (req, res) => {
         status: result.status,
         ms: nowMs() - started,
         view: viewsMatch[1],
+      });
+      return;
+    }
+
+    // POST /proxy/aggregate/:viewName
+    const aggMatch = url.pathname.match(/^\/proxy\/aggregate\/([^/]+)$/);
+    if (aggMatch && req.method === "POST") {
+      let body;
+      try {
+        body = await readJson(req);
+      } catch (e) {
+        send(res, 400, { error: "bad_request", detail: String(e.message ?? e) });
+        log("req", { method: "POST", path: url.pathname, status: 400, ms: nowMs() - started });
+        return;
+      }
+      const result = await handleAggregate(aggMatch[1], body);
+      send(res, result.status, result.body);
+      log("req", {
+        method: "POST",
+        path: url.pathname,
+        status: result.status,
+        ms: nowMs() - started,
+        view: aggMatch[1],
+        op: body?.op,
+        rows_scanned: result.body?.rows_scanned,
+        complete: result.body?.complete,
       });
       return;
     }

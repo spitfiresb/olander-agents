@@ -9,6 +9,13 @@ import {
   type EffectiveScopes,
   type ScopeCatalog,
 } from "@/lib/scopes";
+import {
+  callerHasPricing,
+  coerceRowsBySchema,
+  isSensitiveColumn,
+  PRICING_SCOPE,
+  redactSensitiveRows,
+} from "@/lib/ai/p21-fields";
 
 // Layer 3 chatbot tools. Both call the Layer 2 proxy on the droplet, which:
 //   - holds the P21 credentials
@@ -165,6 +172,60 @@ function annotateViewError(result: unknown): unknown {
   return { ...(result as Record<string, unknown>), hint };
 }
 
+// Post-process a successful viewsQuery page from the proxy before it reaches
+// the model:
+//   - coerce numeric columns the proxy's name-regex missed (by schema type),
+//     so fields like gross_margin/profit_percent sort and compare numerically;
+//   - redact cost/margin columns for callers without the pricing scope;
+//   - flag truncation so a full page is never presented as a complete list or
+//     an exact count.
+// Errors fall through to annotateViewError unchanged.
+function finalizeViewResult(
+  viewName: string,
+  result: unknown,
+  requestedTop: number,
+  scopes: EffectiveScopes,
+): unknown {
+  if (!result || typeof result !== "object" || "error" in result) {
+    return annotateViewError(result);
+  }
+  const obj = result as {
+    rows?: unknown;
+    payload_truncated?: boolean;
+    original_row_count?: number;
+  };
+  if (!Array.isArray(obj.rows)) return result;
+
+  let rows = coerceRowsBySchema(viewName, obj.rows as Record<string, unknown>[]);
+  let redactedColumns: string[] = [];
+  if (!callerHasPricing(scopes)) {
+    const red = redactSensitiveRows(rows);
+    rows = red.rows;
+    redactedColumns = red.redactedColumns;
+  }
+
+  const out: Record<string, unknown> = { rows, count: rows.length };
+  if (rows.length >= requestedTop) {
+    out.more_available = true;
+    out.note_truncation =
+      `Returned ${rows.length} rows — the page limit. More rows probably match. Do NOT present ` +
+      `this as a complete list or an exact count; say "at least N", or page with skip, or use the ` +
+      `aggregate tool for a real total/count.`;
+  }
+  if (obj.payload_truncated) {
+    out.payload_truncated = true;
+    out.original_row_count = obj.original_row_count;
+  }
+  if (redactedColumns.length) {
+    out.redacted_columns = redactedColumns;
+    out.note_redaction =
+      `Cost/margin columns (${redactedColumns.join(", ")}) were withheld — you lack the "Job ` +
+      `pricing" data scope. Do NOT say the system has no such data; tell the user it requires ` +
+      `pricing access that an admin can grant.`;
+  }
+  return out;
+}
+
 function makeViewsQuery(scopes: EffectiveScopes, catalog: ScopeCatalog) {
   return tool({
   description:
@@ -213,14 +274,15 @@ function makeViewsQuery(scopes: EffectiveScopes, catalog: ScopeCatalog) {
   execute: async (input) => {
     const decision = isViewAllowed(input.viewName, scopes, catalog);
     if (!decision.ok) return denyForView(decision);
+    const requestedTop = input.top ?? 20;
     const result = await callProxy("POST", `/proxy/views/${encodeURIComponent(input.viewName)}`, {
       filter: input.filter,
-      top: input.top ?? 20,
+      top: requestedTop,
       skip: input.skip,
       select: input.select,
       orderBy: input.orderBy,
     });
-    return annotateViewError(result);
+    return finalizeViewResult(input.viewName, result, requestedTop, scopes);
   },
   });
 }
@@ -311,6 +373,21 @@ function makeEntityGet(scopes: EffectiveScopes, catalog: ScopeCatalog) {
       .map(encodeURIComponent)
       .join("/")}/${encodeURIComponent(id)}${query}`;
     const result = await callProxy("GET", path);
+    // Redact cost/margin fields on the single record for callers without the
+    // pricing scope (the parts entity carries cost alongside selling prices).
+    if (
+      !callerHasPricing(scopes) &&
+      result &&
+      typeof result === "object" &&
+      !("error" in result)
+    ) {
+      const { rows, redactedColumns } = redactSensitiveRows([
+        result as Record<string, unknown>,
+      ]);
+      const record = rows[0] as Record<string, unknown>;
+      if (redactedColumns.length) record.redacted_columns = redactedColumns;
+      return record;
+    }
     return result;
   },
   });
@@ -411,6 +488,140 @@ function makeSearchCatalog(scopes: EffectiveScopes, catalog: ScopeCatalog) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// aggregate — server-side SUM / COUNT / AVG / MIN / MAX (+ optional GROUP BY)
+//
+// P21's OData tier exposes no $apply / $count, so a single viewsQuery can never
+// answer "total sales this month", "how many open orders", "biggest order by
+// line value", or "top customers by spend" — the model would otherwise eyeball
+// a ≤50-row page and emit a confident wrong number (the CEO's $20k "largest
+// order"). This tool pages through the view via the proxy and folds the rows in
+// the app layer. It is bounded (a fixed page/time budget); when it can't scan
+// the whole population it returns complete:false and the model must disclose the
+// result is a lower bound, not an exact figure.
+// ---------------------------------------------------------------------------
+
+const SAFE_COLUMN = z
+  .string()
+  .regex(/^[a-z0-9_]+$/i, "column must be a bare column name");
+
+function makeAggregate(scopes: EffectiveScopes, catalog: ScopeCatalog) {
+  return tool({
+    description:
+      "Compute a real SUM / COUNT / AVG / MIN / MAX over a P21 view, optionally " +
+      "grouped — the correct way to answer total / count / average / ranking " +
+      "questions. Runs server-side on the droplet next to P21: COUNT is EXACT " +
+      "via $inlinecount (no scan), MIN/MAX EXACT via orderby+top (no scan), and " +
+      "SUM/AVG/grouped fold big pages in one hop. Use it for: 'how many open " +
+      "orders' (op:count on p21_view_oe_hdr), 'total sales this month' (op:sum, " +
+      "column:total_amount on p21_view_invoice_hdr + a date filter), 'biggest " +
+      "order by line value' (op:sum, column:extended_price, groupBy:order_no on " +
+      "p21_view_oe_line, top:1), 'top customers by spend' (op:sum, " +
+      "column:total_amount, groupBy:customer_id on p21_view_invoice_hdr). Returns " +
+      "{ op, value | groups:[{key,value,n}], total_count, rows_scanned, complete }. " +
+      "complete:true means the figure is EXACT — state it plainly, no hedging. " +
+      "complete:false means the scan hit its budget and covers rows_scanned of " +
+      "total_count — report it as a sample of that size and offer a tighter " +
+      "filter; never present it as exact. Cost/margin columns need the pricing scope.",
+    inputSchema: z.object({
+      viewName: z
+        .string()
+        .regex(/^p21_view_[a-z0-9_]+$/i, "must match p21_view_* (e.g. p21_view_invoice_hdr)"),
+      op: z.enum(["sum", "count", "avg", "min", "max"]),
+      column: SAFE_COLUMN.optional().describe(
+        "Numeric column to aggregate. Required for sum/avg/min/max; ignored for count.",
+      ),
+      filter: SAFE_FILTER.optional().describe(
+        "OData $filter to scope the population — e.g. a date range for 'this month'. " +
+          "Same syntax as viewsQuery; datetime'…' literals for dates.",
+      ),
+      groupBy: SAFE_COLUMN.optional().describe(
+        "Optional column to group by; returns the top groups ranked by the aggregate (desc).",
+      ),
+      top: z
+        .number()
+        .int()
+        .min(1)
+        .max(50)
+        .optional()
+        .describe("For grouped results: how many top groups to return. Default 10."),
+    }),
+    execute: async (input) => {
+      const decision = isViewAllowed(input.viewName, scopes, catalog);
+      if (!decision.ok) return denyForView(decision);
+      if (input.op !== "count" && !input.column) {
+        return {
+          error: "bad_request" as const,
+          detail: `op "${input.op}" needs a numeric column. Pass column, or use op:count.`,
+        };
+      }
+      // Don't let aggregation read around the column-level redaction: summing a
+      // cost/margin column still requires the pricing scope.
+      if (!callerHasPricing(scopes)) {
+        const sensitive = [input.column, input.groupBy]
+          .filter((c): c is string => Boolean(c))
+          .find((c) => isSensitiveColumn(c));
+        if (sensitive) {
+          return {
+            error: "scope_denied" as const,
+            resource: `${input.viewName}.${sensitive}`,
+            scope_required: PRICING_SCOPE,
+            scope_label: catalog.scopes.get(PRICING_SCOPE)?.label ?? "Job pricing",
+            detail:
+              "This aggregation references cost/margin data your access doesn't include. " +
+              "Tell the user it needs pricing access; don't claim the data is absent.",
+          };
+        }
+      }
+
+      // The fold runs on the droplet (one hop from P21), not here. We hand off
+      // op/column/filter/groupBy plus a STABLE sort key — the view's key (UID)
+      // column — which the proxy needs for safe $skip paging (docs §Pagination).
+      // COUNT comes back exact via $inlinecount and MIN/MAX exact via
+      // orderby+top, with no scan at all; SUM/AVG/grouped are folded over big
+      // pages and return total_count so coverage is exact, not guessed.
+      const view = getViewSchema(input.viewName);
+      const keyCol =
+        view?.columns.find((c) => c.key)?.name ?? view?.columns[0]?.name;
+
+      const res = await callProxy(
+        "POST",
+        `/proxy/aggregate/${encodeURIComponent(input.viewName)}`,
+        {
+          op: input.op,
+          column: input.column,
+          filter: input.filter,
+          groupBy: input.groupBy,
+          orderBy: keyCol,
+          top: input.top,
+        },
+      );
+      if (!res || typeof res !== "object" || "error" in res) {
+        return annotateViewError(res);
+      }
+
+      const out = res as Record<string, unknown> & {
+        complete?: boolean;
+        rows_scanned?: number;
+        total_count?: number | null;
+      };
+      // Honest coverage: $inlinecount gives the exact population, so a partial
+      // scan reports "X of Y", never a vague "lower bound of unknown size".
+      if (out.complete === false) {
+        const scanned = typeof out.rows_scanned === "number" ? out.rows_scanned : 0;
+        const total = typeof out.total_count === "number" ? out.total_count : null;
+        const pct = total ? ` (~${Math.round((scanned / total) * 100)}%)` : "";
+        out.note =
+          `Partial — scanned ${scanned.toLocaleString()}${total ? ` of ${total.toLocaleString()}` : ""} rows${pct} ` +
+          `before the scan budget. Treat the value as a LOWER BOUND and any ranking as approximate; tell the ` +
+          `user it's based on a sample of that size and offer a tighter filter (e.g. a narrower date range) for ` +
+          `an exact figure.`;
+      }
+      return out;
+    },
+  });
+}
+
 // Build the tool set for a single chat request. Pass the caller's effective
 // scopes ("all" for admins) along with the ScopeCatalog snapshot loaded at
 // request entry — every tool's execute path runs the scope check before any
@@ -421,5 +632,6 @@ export function buildTools(scopes: EffectiveScopes, catalog: ScopeCatalog) {
     describeView: makeDescribeView(scopes, catalog),
     entityGet: makeEntityGet(scopes, catalog),
     searchCatalog: makeSearchCatalog(scopes, catalog),
+    aggregate: makeAggregate(scopes, catalog),
   } as const;
 }

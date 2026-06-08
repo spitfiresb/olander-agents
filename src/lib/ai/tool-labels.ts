@@ -22,6 +22,13 @@ type SearchCatalogInput = {
   topK?: number;
 };
 
+type AggregateInput = {
+  viewName?: string;
+  op?: string;
+  column?: string;
+  groupBy?: string;
+};
+
 const VIEW_LABELS: Record<string, string> = {
   p21_view_inv_mast: "Inventory search",
   p21_view_inv_loc: "Stock-on-hand lookup",
@@ -63,6 +70,17 @@ export function labelForToolPart(
     const q = (v.query ?? "").trim();
     const sub = q ? (q.length > 48 ? `"${q.slice(0, 45)}…"` : `"${q}"`) : undefined;
     return { label: "Catalog search", sublabel: sub };
+  }
+  if (toolName === "aggregate") {
+    const v = (input ?? {}) as AggregateInput;
+    const op = (v.op ?? "").toLowerCase();
+    const verb =
+      op === "count" ? "Count" : op ? `${op[0].toUpperCase()}${op.slice(1)}` : "Total";
+    const view = VIEW_LABELS[(v.viewName ?? "").toLowerCase()] ?? v.viewName;
+    return {
+      label: `${verb}${v.groupBy ? " by group" : ""}`,
+      sublabel: view,
+    };
   }
   return { label: toolName };
 }
@@ -108,6 +126,11 @@ export function summarizeToolUsageForCitation(
     const matches = matchCount(output);
     if (matches == null) return "catalog search";
     return `catalog search (${matches} match${matches === 1 ? "" : "es"})`;
+  }
+  if (toolName === "aggregate") {
+    const v = (input ?? {}) as AggregateInput;
+    const view = v.viewName ?? "view";
+    return `${view} (${v.op ?? "aggregate"}${v.groupBy ? ` by ${v.groupBy}` : ""})`;
   }
   return null;
 }
