@@ -3,6 +3,9 @@ import {
   callerHasPricing,
   coerceRowsBySchema,
   isSensitiveColumn,
+  isSentinelDate,
+  nullifySentinelDates,
+  nullifySentinelDatesLoose,
   parseNumeric,
   redactSensitiveRows,
 } from "@/lib/ai/p21-fields";
@@ -151,6 +154,77 @@ describe("coerceRowsBySchema", () => {
   it("returns rows unchanged for an unknown view", () => {
     const input = [{ a: "1" }];
     expect(coerceRowsBySchema("p21_view_not_real", input)).toBe(input);
+  });
+});
+
+describe("isSentinelDate", () => {
+  it("recognizes P21 / SQL placeholder dates at exact midnight", () => {
+    for (const v of [
+      "1990-01-01T00:00:00", // P21 "never sold"
+      "1900-01-01T00:00:00",
+      "1753-01-01T00:00:00", // SQL Server datetime min
+      "9999-12-31T00:00:00",
+      "1990-01-01T00:00:00.000",
+      "1990-01-01T00:00:00Z",
+    ]) {
+      expect(isSentinelDate(v), v).toBe(true);
+    }
+  });
+
+  it("leaves real dates and non-dates alone", () => {
+    for (const v of [
+      "2026-05-26T13:14:37", // a real sale — has a wall-clock time
+      "1990-01-01T09:30:00", // same date but a real time → not a sentinel
+      "2011-08-13T00:00:00", // midnight but a plausible business date
+      "1991-01-01T00:00:00",
+      "PN12345-01",
+      "",
+      42,
+      null,
+      undefined,
+    ]) {
+      expect(isSentinelDate(v as unknown), String(v)).toBe(false);
+    }
+  });
+});
+
+describe("nullifySentinelDates (schema-driven)", () => {
+  it("nulls a sentinel in a DateTime column but keeps a real date", () => {
+    // last_sale_date is DateTime in p21_view_inv_loc; the 1990 sentinel is the
+    // dead-stock-list bug — it must read as null ("never sold"), not a date.
+    const rows = nullifySentinelDates("p21_view_inv_loc", [
+      { item_id: "DEAD", qty_on_hand: 0, last_sale_date: "1990-01-01T00:00:00" },
+      { item_id: "LIVE", qty_on_hand: 436, last_sale_date: "2026-05-26T13:14:37" },
+    ]);
+    expect(rows[0].last_sale_date).toBeNull();
+    expect(rows[1].last_sale_date).toBe("2026-05-26T13:14:37");
+  });
+
+  it("never touches a non-date column even if it holds the sentinel string", () => {
+    // item_id is String-typed; a value identical to the sentinel must survive.
+    const rows = nullifySentinelDates("p21_view_inv_loc", [
+      { item_id: "1990-01-01T00:00:00", qty_on_hand: 5 },
+    ]);
+    expect(rows[0].item_id).toBe("1990-01-01T00:00:00");
+  });
+
+  it("returns rows unchanged for an unknown view", () => {
+    const input = [{ last_sale_date: "1990-01-01T00:00:00" }];
+    expect(nullifySentinelDates("p21_view_not_real", input)).toBe(input);
+  });
+});
+
+describe("nullifySentinelDatesLoose (name-gated, for entityGet)", () => {
+  it("nulls sentinels on date-named fields, keeps everything else", () => {
+    const rec = nullifySentinelDatesLoose({
+      item_id: "DEAD",
+      last_sale_date: "1990-01-01T00:00:00",
+      date_last_modified: "2025-10-21T13:13:20",
+      part_number: "1990-01-01T00:00:00", // not a date field name → untouched
+    });
+    expect(rec.last_sale_date).toBeNull();
+    expect(rec.date_last_modified).toBe("2025-10-21T13:13:20");
+    expect(rec.part_number).toBe("1990-01-01T00:00:00");
   });
 });
 

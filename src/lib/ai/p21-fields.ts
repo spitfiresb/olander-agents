@@ -114,6 +114,82 @@ export function coerceRowsBySchema(viewName: string, rows: Row[]): Row[] {
   });
 }
 
+// P21 stores "no date" as a magic placeholder, never SQL NULL: last_sale_date
+// is `1990-01-01` for an item that has NEVER sold (186k of 260k inv_loc rows),
+// and other date columns carry the SQL Server datetime floor/ceiling. Left
+// as-is they read as real dates, so "days since last sale" becomes a confident
+// ~36-year age and "longest dead stock" sorts these never-sold rows to the top.
+// We null them here, schema-driven (DateTime columns only), so a sentinel reads
+// as "never" — the thing it actually means. Matched on the date part at exact
+// midnight (every sentinel is 00:00:00); a real event would carry a wall-clock
+// time, and Olander's P21 has no genuine 1900/1990 history. See
+// docs/P21_API.md §Sentinels and TESTING.md § "Sentinel dates".
+const SENTINEL_DATE_PARTS = new Set([
+  "1753-01-01", // SQL Server datetime min
+  "1900-01-01", // common P21 / SQL default
+  "1990-01-01", // P21 "never sold / never received" placeholder
+  "9999-12-31", // SQL Server datetime max ("no end date")
+]);
+const ISO_DATETIME = /^(\d{4}-\d{2}-\d{2})T00:00:00(\.0+)?Z?$/;
+
+export function isSentinelDate(v: unknown): boolean {
+  if (typeof v !== "string") return false;
+  const m = ISO_DATETIME.exec(v);
+  return m ? SENTINEL_DATE_PARTS.has(m[1]) : false;
+}
+
+// Null out placeholder dates in a row set, using the bundled schema to act only
+// on DateTime/Date-typed columns (so an all-digit string ID that happens to look
+// date-ish is never touched). Pure; returns new rows only where something
+// changed. Applied in tools.ts after the proxy returns, alongside numeric
+// coercion and redaction.
+const DATE_TYPES = new Set(["DateTime", "Date", "DateTimeOffset"]);
+
+export function nullifySentinelDates(viewName: string, rows: Row[]): Row[] {
+  const view = getViewSchema(viewName);
+  if (!view) return rows;
+  const dateCols = new Set(
+    view.columns.filter((c) => DATE_TYPES.has(c.type)).map((c) => c.name),
+  );
+  if (dateCols.size === 0) return rows;
+  return rows.map((row) => {
+    let changed = false;
+    const out: Row = {};
+    for (const [k, v] of Object.entries(row)) {
+      if (dateCols.has(k) && isSentinelDate(v)) {
+        out[k] = null;
+        changed = true;
+      } else {
+        out[k] = v;
+      }
+    }
+    return changed ? out : row;
+  });
+}
+
+// entityGet returns a single record from an entity route (v2/parts, customers,
+// orders), not a p21_view_*, so there's no bundled column schema to consult.
+// Fall back to gating on the field NAME (every P21 date column carries "date" in
+// its name — last_sale_date, date_created, net_due_date, order_date). The
+// sentinel match itself is exact-midnight on a known floor/ceiling date, so the
+// name gate is just extra caution against nulling a non-date field that somehow
+// holds that exact string.
+const DATE_NAME = /date/i;
+
+export function nullifySentinelDatesLoose(record: Row): Row {
+  let changed = false;
+  const out: Row = {};
+  for (const [k, v] of Object.entries(record)) {
+    if (DATE_NAME.test(k) && isSentinelDate(v)) {
+      out[k] = null;
+      changed = true;
+    } else {
+      out[k] = v;
+    }
+  }
+  return changed ? out : record;
+}
+
 // Tolerant numeric parse for aggregation folds. Accepts numbers, plain numeric
 // strings, and strips thousands separators / surrounding whitespace. Returns
 // null for anything non-numeric (null, "", "N", "PN12345-01") so the fold can

@@ -148,10 +148,15 @@ The agent must FAIL LOUD, not quiet: when it can't compute exactly, it says so. 
 - **the hosting provider IP allowlist** — the dev egress IP is `<proxy-ip>` (DO Reserved IP on droplet-1 / SFO2). If P21 starts rejecting, confirm the droplet is still routing via that IP.
 - **RFC1918 DNS override** — P21's public DNS resolves to a private IP. The droplet's `/etc/hosts` overrides this with `<p21-host-ip>`. If you rebuild the droplet, the override has to be re-applied (see `install.sh`).
 - **Proxy credentials** — `proxy-server.mjs` reads creds from env. Missing creds surface as `proxy_up.creds_present: false` in `/api/status`.
+- **Grain / sentinel / dead-stock class** (the confidently-wrong-*data* class — distinct from the wrong-*number* class in §2). A "top 10 dead stock at 0 stock" list once included a part with 436 units on hand. Three independent data traps, each guarded now:
+  - **Grain** — `p21_view_inv_loc` is one row per item × *location* (Olander runs ~3 warehouses); `oe_line`/`invoice_line` are per *line*; lot/bin/serial views per lot/bin/serial. **~81% of inv_loc rows read `qty_on_hand=0` only because the item isn't carried at that location.** Filtering `qty_on_hand eq 0` and listing the rows surfaces phantoms (items fully stocked elsewhere). Company-wide stock must roll up across locations. System prompt has the GRAIN + STOCK AVAILABILITY guardrails; if the model lists raw zero-rows as "out of stock," it regressed.
+  - **Sentinel dates** — P21 stores "never sold" as `last_sale_date = 1990-01-01` (186k of 260k inv_loc rows), not null. `nullifySentinelDates`/`nullifySentinelDatesLoose` in `p21-fields.ts` null these (DateTime cols / date-named fields) so the model reads "never," not a fabricated ~36-year age. Unit-tested in `p21-fields.test.ts`. **App-layer only — takes effect with no droplet deploy.** Watch: a "hasn't sold in 36 years" answer means the nullify pass was bypassed.
+  - **Find-the-zeros / full-fold timeout** — `aggregate` now takes `order:'asc'` + `having:{op,value}` (returns `groups_matching`) for bottom/zero questions; **a full `inv_loc` fold times out at ~23%**, so the model must filter first (e.g. `qty_on_hand gt 0` → exact in ~12s). The dead-stock recipes live in the system prompt's "DEAD / SLOW-MOVING STOCK" guardrail. **`order`/`having` require a droplet deploy of `proxy-server.mjs`** — until deployed they're ignored upstream (groups still rank desc, no having filter), so verify against the live proxy after restart.
 
 ### When you change P21-touching code
 - [ ] Re-read `docs/P21_API.md` (auth flow, OData operators, real response shapes) before writing new request code — the API has gotchas that aren't obvious from the response format.
 - [ ] No P21 hostnames, internal IPs, or response bodies surface in user-facing errors.
+- [ ] If you touched `nullifySentinelDates`/sentinel handling, re-run `p21-fields.test.ts`; if you touched `aggregate` `order`/`having`, deploy `proxy-server.mjs` and re-verify against the live proxy (the app schema change alone is inert without the proxy).
 
 ---
 
