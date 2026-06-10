@@ -46,12 +46,27 @@ if (!TOKEN) {
 }
 
 // ---------------------------------------------------------------------------
-// Per-IP rate limiter. 30 requests / minute per remote IP, bursts up to 30.
-// Healthz is exempt — kept simple by checking the path before the bucket.
+// Per-IP rate limiter (token bucket), keyed on the source IP. Caveat: all app
+// traffic arrives from a small pool of SHARED Vercel egress IPs, so in practice
+// this is a coarse near-global backstop, not a true per-client limit.
+//
+// Sized for BURSTS, not a steady drip: gpt-4.1-mini fires tool calls in
+// parallel, so one chat turn can throw a dozen near-simultaneous proxy requests,
+// and concurrent reps stack on the same IP. The old 30-capacity / 0.5-per-sec
+// bucket drained on a single busy turn and 429'd live traffic (observed in prod
+// 2026-06-08 and 2026-06-10 — see journald). Capacity 600 absorbs a burst;
+// refill 10/sec (=600/min) recovers fast enough that the next burst isn't
+// starved. This limiter only sees app→droplet request rate; the heavier
+// droplet→P21 load (aggregate paging) is bounded separately (AGG_CONCURRENCY),
+// so raising this does not uncap pressure on the shared ERP.
+//
+// PROPER FIX (follow-up): key the bucket per-user — forward the app's userId and
+// bucket on that — so one rep's burst can't throttle the others. This raise is
+// the interim stop-the-bleeding. Healthz is exempt (path-checked before the bucket).
 // ---------------------------------------------------------------------------
 
-const RATE_CAPACITY = 30;
-const RATE_REFILL_PER_SEC = 30 / 60;
+const RATE_CAPACITY = 600;
+const RATE_REFILL_PER_SEC = 600 / 60; // 10 tokens/sec — see burst note above
 const ipBuckets = new Map();
 let lastIpSweep = Date.now();
 
@@ -801,6 +816,12 @@ function scrubDetail(s) {
 const server = createServer(async (req, res) => {
   const started = nowMs();
   const url = new URL(req.url ?? "/", `http://${HOST}`);
+  // Computed once so every proxy log line can carry the source IP. DIAGNOSTIC:
+  // confirms whether all app traffic arrives from a few shared Vercel egress IPs
+  // — the blind spot in the per-IP rate limit (rateCheck keys on this). Mine with
+  //   journalctl -u olander-proxy -o cat | jq -r 'select(.path|startswith("/proxy/")).ip' | sort | uniq -c
+  // Once the IP-sharing question is settled, the extra `ip` fields can come back out.
+  const clientIp = clientIpFor(req);
 
   try {
     if (!checkAuth(req)) {
@@ -812,11 +833,10 @@ const server = createServer(async (req, res) => {
     // Healthz is exempt from per-IP rate limit so monitoring probes keep
     // working under burst load. All other paths run through the bucket.
     if (url.pathname !== "/proxy/healthz") {
-      const ip = clientIpFor(req);
-      const rl = rateCheck(ip);
+      const rl = rateCheck(clientIp);
       if (!rl.ok) {
         send(res, 429, { error: "rate_limited" }, { "Retry-After": String(rl.retryAfterSec) });
-        log("req", { method: req.method, path: url.pathname, status: 429, ms: nowMs() - started, ip });
+        log("req", { method: req.method, path: url.pathname, status: 429, ms: nowMs() - started, ip: clientIp });
         return;
       }
     }
@@ -859,6 +879,7 @@ const server = createServer(async (req, res) => {
         status: result.status,
         ms: nowMs() - started,
         view: viewsMatch[1],
+        ip: clientIp,
       });
       return;
     }
@@ -885,6 +906,7 @@ const server = createServer(async (req, res) => {
         op: body?.op,
         rows_scanned: result.body?.rows_scanned,
         complete: result.body?.complete,
+        ip: clientIp,
       });
       return;
     }
@@ -905,6 +927,7 @@ const server = createServer(async (req, res) => {
         ms: nowMs() - started,
         area,
         resource,
+        ip: clientIp,
       });
       return;
     }
