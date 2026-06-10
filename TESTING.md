@@ -85,12 +85,18 @@ Update this file when a new class of regression bites us. Promote sections up th
 - **`convertToModelMessages` is async** (69eaddb) — must be `await`ed in the route. Without await, the model receives a Promise and errors mid-stream.
 - **User message schema was too loose** (760db8a) — `parts: z.unknown()` let a client forge `tool-result` parts the model treated as authoritative. User-role parts must be **text-only** (`UserTextPart`). Don't relax this without server-persisted message state.
 - **MessageList lint + body bg drift** (3554634) — style/lint regressions that slipped through. Run `npm run lint` before declaring done.
+- **Blank reply: model stops with zero text after tool calls** — gpt-4.1-mini sometimes ends its tool loop on a tool result with `finishReason: "stop"` and no synthesis turn (Sonnet never did this; it surfaced only after the OpenAI switch as "ran all its ERP searches, then nothing"). The route streams via `createUIMessageStream` and, when the loop finishes cleanly with no visible text, runs a **recovery pass** (`toolChoice: 'none'`, tool results replayed) appended to the same assistant message. Don't revert to a bare `result.toUIMessageStreamResponse(...)` — that reintroduces the stall.
+- **`result.usage` is the LAST step only** (AI SDK v6) — persisting it undercounted every multi-step tool turn, so the trial spend gate and `/admin/usage` saw a fraction of real provider spend. Persistence must use `result.totalUsage` (plus the recovery pass's usage when it ran).
+- **Provider failure modes surfaced as the generic error** — OpenAI quota exhaustion (`insufficient_quota`, a 429 that retrying never fixes) fell through `mapToFriendlyCode` to "Something went wrong." The `provider_quota` code exists for quota/billing/credit-balance strings and must stay ordered BEFORE the `rate_limited` check (quota errors also contain 429).
 
 ### When you change `src/app/api/chat/route.ts`
 - [ ] `UserTextPart` still rejects non-text parts.
 - [ ] `BodySchema` still bounds messages at `.max(50)`.
 - [ ] `stepCountIs(10)` is the stop condition (or higher — never unbounded). Was tightened to 4 at one point and the chatbot started returning empty responses on chains like `describeView → viewsQuery (retry) → viewsQuery (retry) → viewsQuery (success)` because the loop terminated before the model got a synthesis step. With `describeView` in the loop, leave plenty of headroom.
 - [ ] `prepareStep` still forces `toolChoice: 'none'` on the final step. This guarantees a synthesized text answer instead of a blank when a model would otherwise spend the whole step budget looping on tool calls (seen with gpt-4o-mini repeating a failing PO search 10×). Paired with the self-healing error hints in `tools.ts` (`annotateViewError`), which tell the model to fix-and-not-retry a rejected query.
+- [ ] The blank-answer recovery pass still exists: the `createUIMessageStream` execute loop tracks `sawText`/`sawError` and re-prompts with `toolChoice: 'none'` when a clean finish produced no text. Verify the stream still ends with exactly one `finish` chunk (written manually — both phases stream with `sendFinish: false`).
+- [ ] Persisted usage comes from `result.totalUsage` (all steps), never `result.usage` (last step only) — the trial gate prices what's persisted.
+- [ ] `maxDuration` stays ≥ 300 — multi-step P21 chains (25s proxy timeout per call) regularly exceed 60s, and the function being killed mid-stream is a user-facing stall.
 - [ ] `auth()` gate is still in place; the only bypass is the dev `ALLOW_UNAUTHED_DEV` flag.
 - [ ] Errors return JSON, not throw — frontend expects shaped error responses.
 
@@ -119,7 +125,8 @@ The agent must FAIL LOUD, not quiet: when it can't compute exactly, it says so. 
 - [ ] Visit `/status` while signed out → page renders, shows operational/degraded/down per service, **no internal IPs or hostnames anywhere in the HTML or `/api/status` JSON**.
 - [ ] Each service shows a 90-day uptime bar that isn't entirely empty.
 - [ ] P21 service reflects the droplet's actual health (force a failure on the droplet → status page shows it within the refresh window).
-- [ ] Anthropic service reflects the droplet's direct probe of `api.anthropic.com/v1/models` (operational when the probe gets any 2xx/3xx/4xx response — a healthy API replies 401 to the unauth'd request; only 5xx / timeout / connection error → down). No `status.anthropic.com` fallback — that source was too noisy and was retired.
+- [ ] The AI-provider card tracks the **active** provider (`AI_PROVIDER`): it must show OpenAI when production runs OpenAI, Anthropic when it runs Anthropic. The droplet probes both `api.anthropic.com/v1/models` and `api.openai.com/v1/models` every run (operational when the probe gets any 2xx/3xx/4xx response — a healthy API replies 401 to the unauth'd request; only 5xx / timeout / connection error → down); `/api/status` picks which to surface via `getActiveProvider()`. The original miss: prod switched to OpenAI while the status page kept watching Anthropic, so a client-facing provider outage showed all-green. No Statuspage fallback — that source was too noisy and was retired.
+- [ ] After changing a provider or probe: redeploy the droplet (`scripts/deploy-droplet.sh`) — a Vercel-only deploy leaves the card on "Awaiting upgraded droplet probe" until the droplet emits the new check field.
 
 ### Things that have actually broken
 - **`/api/status` leaked check details to unauthenticated callers** (435c0f2) — exact IPs, hostnames, HTTP error bodies from internal hosts. Fix was symbolic labels only (`"egress IP mismatch"`, not the actual IP). Re-check after any edit to `buildP21Service`.

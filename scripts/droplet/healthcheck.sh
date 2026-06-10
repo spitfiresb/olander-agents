@@ -16,10 +16,13 @@ EXPECTED_EGRESS_IP="${EXPECTED_EGRESS_IP:-<proxy-ip>}"
 P21_HOST="${P21_HOST:-<p21-host>}"
 P21_EXPECTED_DNS="${P21_EXPECTED_DNS:-<p21-host-ip>}"
 P21_PROBE_URL="${P21_PROBE_URL:-https://${P21_HOST}/prophet21/}"
-# Hit the real API our chat uses, not Anthropic's Statuspage. Unauth'd
+# Hit the real APIs our chat can use, not their Statuspages. Unauth'd
 # /v1/models returns 401 with a JSON body when the API is healthy — that 401
 # is the "ok" signal. Timeouts, connection errors, and 5xx are real outages.
+# Both providers are probed every run; /api/status surfaces whichever one
+# AI_PROVIDER makes active so a provider switch never leaves a blind spot.
 ANTHROPIC_PROBE_URL="${ANTHROPIC_PROBE_URL:-https://api.anthropic.com/v1/models}"
+OPENAI_PROBE_URL="${OPENAI_PROBE_URL:-https://api.openai.com/v1/models}"
 # OLANDER_DOMAIN is optional. If set, we add a TLS-expiry check for
 # egress.<domain> to the JSON record. If unset, the field is omitted.
 OLANDER_DOMAIN="${OLANDER_DOMAIN:-}"
@@ -253,6 +256,23 @@ if [[ "$anth_status" =~ ^[234][0-9][0-9]$ ]]; then
   anth_ok=true
 fi
 
+# --- Check 7: OpenAI API reachability ----------------------------------------
+# Same semantics as the Anthropic probe: unauth'd /v1/models, 401 = healthy.
+oai_ok=false
+oai_status=0
+oai_latency=0
+oai_start="$(now_ms)"
+oai_status_raw="$(curl -sS -o /dev/null --max-time 10 -w '%{http_code}' \
+  "$OPENAI_PROBE_URL" 2>/dev/null || true)"
+oai_end="$(now_ms)"
+[[ -n "$oai_end" && -n "$oai_start" ]] && oai_latency=$(( oai_end - oai_start ))
+if [[ "$oai_status_raw" =~ ^[0-9]{3}$ ]]; then
+  oai_status="$oai_status_raw"
+fi
+if [[ "$oai_status" =~ ^[234][0-9][0-9]$ ]]; then
+  oai_ok=true
+fi
+
 # --- Aggregate ---------------------------------------------------------------
 if [[ "$egress_ok" == "true" && "$dns_ok" == "true" && "$p21_ok" == "true" ]]; then
   overall="ok"
@@ -290,6 +310,7 @@ record="$(
   PROXY_PRESENT="$proxy_present" PROXY_OK="$proxy_ok" PROXY_STATUS="$proxy_status" PROXY_LATENCY="$proxy_latency" PROXY_CREDS="$proxy_creds_present" PROXY_URL="$PROXY_HEALTHZ_URL" \
   P21_API_OK="$p21_api_ok" P21_TOKEN_OK="$proxy_token_ok" P21_VIEW_OK="$proxy_view_ok" P21_LAST_ERROR="$proxy_last_error" \
   ANTH_OK="$anth_ok" ANTH_STATUS="$anth_status" ANTH_LATENCY="$anth_latency" \
+  OAI_OK="$oai_ok" OAI_STATUS="$oai_status" OAI_LATENCY="$oai_latency" \
   python3 -c '
 import json, os
 e = os.environ
@@ -308,6 +329,7 @@ if b("PROXY_PRESENT"):
   checks["proxy_up"] = {"ok": b("PROXY_OK"), "http_status": i("PROXY_STATUS"), "latency_ms": i("PROXY_LATENCY"), "creds_present": b("PROXY_CREDS"), "url": e["PROXY_URL"]}
   checks["p21_api"] = {"ok": b("P21_API_OK"), "token_ok": b("P21_TOKEN_OK"), "view_query_ok": b("P21_VIEW_OK"), "last_error": e["P21_LAST_ERROR"], "creds_present": b("PROXY_CREDS")}
 checks["anthropic"] = {"ok": b("ANTH_OK"), "http_status": i("ANTH_STATUS"), "latency_ms": i("ANTH_LATENCY")}
+checks["openai"] = {"ok": b("OAI_OK"), "http_status": i("OAI_STATUS"), "latency_ms": i("OAI_LATENCY")}
 print(json.dumps({
   "checked_at": e["CHECKED_AT"],
   "overall":    e["OVERALL"],

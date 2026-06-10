@@ -42,7 +42,11 @@ export function ToolCallCard({ part }: { part: ToolPartLike }) {
   const filterText = (part.input as { filter?: string } | undefined)?.filter;
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-brand-charcoal/10 bg-white">
+    // animate-message-in: OpenAI models emit tool calls in parallel bursts
+    // (Anthropic paced them one per step), so several cards can mount in the
+    // same render. The mount animation keeps that a fade-up instead of a hard
+    // pop-in; reduced-motion users get an instant render via the media query.
+    <div className="animate-message-in overflow-hidden rounded-2xl border border-brand-charcoal/10 bg-white">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}

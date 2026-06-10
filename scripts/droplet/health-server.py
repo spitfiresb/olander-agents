@@ -127,7 +127,7 @@ def _format(buckets, daily):
 
 
 def compute_uptime_and_daily(now):
-    """Stream the log once, bucket records for P21, Anthropic, and P21 API.
+    """Stream the log once, bucket records for P21, Anthropic, OpenAI, and P21 API.
 
     Records written before a given probe was added don't have its field — those
     are skipped from that probe's stats so we never count "no data" as either
@@ -142,6 +142,8 @@ def compute_uptime_and_daily(now):
     p21_daily = _empty_daily(today)
     anth_buckets = _empty_buckets(WINDOWS)
     anth_daily = _empty_daily(today)
+    oai_buckets = _empty_buckets(WINDOWS)
+    oai_daily = _empty_daily(today)
     api_buckets = _empty_buckets(WINDOWS)
     api_daily = _empty_daily(today)
 
@@ -168,6 +170,13 @@ def compute_uptime_and_daily(now):
                         anth.get("ok") is True,
                         ts, cutoffs, anth_buckets, anth_daily, daily_cutoff,
                     )
+                # OpenAI: same semantics as the Anthropic probe.
+                oai = (rec.get("checks") or {}).get("openai")
+                if isinstance(oai, dict):
+                    _bucket_record(
+                        oai.get("ok") is True,
+                        ts, cutoffs, oai_buckets, oai_daily, daily_cutoff,
+                    )
                 # P21 API: only count records where the probe actually ran
                 # (creds present + field emitted).
                 api = (rec.get("checks") or {}).get("p21_api")
@@ -181,8 +190,14 @@ def compute_uptime_and_daily(now):
 
     p21_uptime, p21_daily_out = _format(p21_buckets, p21_daily)
     anth_uptime, anth_daily_out = _format(anth_buckets, anth_daily)
+    oai_uptime, oai_daily_out = _format(oai_buckets, oai_daily)
     api_uptime, api_daily_out = _format(api_buckets, api_daily)
-    return p21_uptime, p21_daily_out, anth_uptime, anth_daily_out, api_uptime, api_daily_out
+    return (
+        p21_uptime, p21_daily_out,
+        anth_uptime, anth_daily_out,
+        oai_uptime, oai_daily_out,
+        api_uptime, api_daily_out,
+    )
 
 
 def get_cached_uptime_and_daily(now):
@@ -230,6 +245,7 @@ class Handler(BaseHTTPRequestHandler):
         (
             p21_uptime, p21_daily,
             anth_uptime, anth_daily,
+            oai_uptime, oai_daily,
             api_uptime, api_daily,
         ) = get_cached_uptime_and_daily(datetime.now(timezone.utc))
         body = json.dumps(
@@ -238,6 +254,7 @@ class Handler(BaseHTTPRequestHandler):
                 "uptime": p21_uptime,
                 "daily": p21_daily,
                 "anthropic": {"uptime": anth_uptime, "daily": anth_daily},
+                "openai": {"uptime": oai_uptime, "daily": oai_daily},
                 "p21_api": {"uptime": api_uptime, "daily": api_daily},
             },
             separators=(",", ":"),

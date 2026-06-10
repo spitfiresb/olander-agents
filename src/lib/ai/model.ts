@@ -26,6 +26,13 @@ function resolveProvider(): Provider {
   return "anthropic";
 }
 
+// The active provider, exported for surfaces that must follow the provider
+// switch — e.g. /api/status shows the probe for THE provider chat actually
+// uses (monitoring Anthropic while production runs OpenAI hides real outages).
+export function getActiveProvider(): Provider {
+  return resolveProvider();
+}
+
 // The active model id — used both to construct the model and to stamp the
 // `model` column on persisted assistant messages so history stays accurate
 // across a provider switch.
@@ -62,7 +69,8 @@ export function getGenerationParams(): {
         // Reasoning tokens count against the output budget, so give more headroom
         // than the 2048 below — a few hundred reasoning tokens shouldn't be able
         // to truncate the visible answer. Still bounded to keep the long tail
-        // under the 60s edge-function timeout; raise here if real answers truncate.
+        // under the chat route's 300s function timeout; raise here if real
+        // answers truncate.
         maxOutputTokens: 4096,
         providerOptions: {
           openai: { reasoningEffort: "low", textVerbosity: "low" },
@@ -83,7 +91,7 @@ export function getGenerationParams(): {
     temperature: 0.2,
     // Any factual lookup answer should fit comfortably; if a real question
     // truncates, raise here rather than letting the long tail blow past the
-    // 60s edge function timeout.
+    // chat route's 300s function timeout.
     maxOutputTokens: 2048,
     providerOptions: undefined,
   };
