@@ -6,8 +6,9 @@ Olander's IT side should be able to follow it without involving us.
 ## Topology recap
 
 ```
- user (browser)  ─►  Vercel (Next.js)  ─►  Anthropic
-                          │
+ user (browser)  ─►  Vercel (Next.js)  ─►  AI provider (AI_PROVIDER env:
+                          │                openai today — gpt-4.1-mini;
+                          │                anthropic / google switchable)
                           └─►  DigitalOcean droplet  ─►  P21 (the hosting provider)
                           │       (proxy + Caddy)
                           ├─►  Neon Postgres  (auth + chat history)
@@ -77,7 +78,7 @@ Access is per-email, controlled in the app — no deploy needed.
 |-------|------|
 | Vercel → Logs | App requests, `/api/chat` errors, `[chat] usage` |
 | Droplet: `journalctl -u olander-proxy -f` | Proxy traffic, P21 mint / errors |
-| Anthropic console → Usage | Tokens by day, spend |
+| OpenAI platform → Usage (active provider) | Tokens by day, spend |
 | Neon console → Monitoring | DB CPU / connections |
 
 ### Forwarding droplet logs off-host (optional)
@@ -106,8 +107,12 @@ hostname. Should be empty.
 - **P21 proxy** red → SSH droplet, `systemctl status olander-proxy`. If
   the service is up but `/proxy/healthz` returns `creds_present: false`,
   re-check `/etc/olander-proxy.env`.
-- **Anthropic** red → check `status.anthropic.com` for a provider
-  incident. Verify the API key is still active.
+- **AI provider** red (the card names whichever provider `AI_PROVIDER`
+  makes active — OpenAI today) → check the provider's status page
+  (`status.openai.com` / `status.anthropic.com`) for an incident. Verify
+  the API key is still active AND the account has credit — a burst of
+  "out of credits" errors in chat means the provider account's balance or
+  quota ran out, which no retry fixes; top up in the provider console.
 - **Auth** errors at the branded `/auth/error` page → most likely the
   Entra app secret expired. Generate a new one in Azure portal, update
   Vercel env, redeploy.
@@ -124,17 +129,22 @@ hostname. Should be empty.
 
 | Vendor | Where it breaks | How to file |
 |--------|----------------|-------------|
-| Anthropic | Streaming errors, 5xx from the model | https://status.anthropic.com + Anthropic support email |
+| OpenAI (active AI provider) | Streaming errors, 5xx from the model, quota | https://status.openai.com + platform.openai.com support |
+| Anthropic (if switched back) | Same, when `AI_PROVIDER=anthropic` | https://status.anthropic.com + Anthropic support email |
 | Vercel | Build / deploy / edge errors | Vercel dashboard → Support |
 | Neon | DB unavailable / `creds_pending` | Neon dashboard → Support |
 | DigitalOcean | Droplet down / network issue | DO dashboard → Support |
 | the hosting provider / P21 | Auth or data path failure | the provider contact at Olander |
 
-## Anthropic budget cap
+## AI provider budget cap
 
-Set a monthly spend ceiling in the Anthropic console under
-**Billing → Usage limits**. Suggest $500/mo to start. Alerts at 50% /
-80% / 100% to ops email.
+Set a monthly spend ceiling in the active provider's console — OpenAI:
+**platform.openai.com → Settings → Limits** (set both a monthly budget
+and an email alert threshold). Suggest $500/mo to start, alerts at 50% /
+80% / 100% to ops email. Prefer auto-recharge with a cap over prepaid
+credits: silently running the balance to $0 takes the whole chat down
+with "out of credits" errors for every rep. (If switched back to
+Anthropic: console → Billing → Usage limits, same idea.)
 
 ## Backups
 

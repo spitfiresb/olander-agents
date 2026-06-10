@@ -34,6 +34,12 @@ const ACCURACY_PROBES = [
   "What did we invoice in total over the last 30 days?",
   "Who are our top 5 customers by invoiced revenue?",
   "How many of 31C100SHCS can we actually ship right now?",
+  // Grain / sentinel / dead-stock class (the per-location dead-stock bug):
+  // eyeball that the model rolls up locations, treats a 1990 last_sale_date as
+  // "never sold" (no fabricated age), and doesn't list per-location phantoms.
+  "Show me our top 10 dead stock items and how long they've been sitting unsold.",
+  "Which parts are out of stock at every location?",
+  "When did 4007JS16-16SS last sell, and do we have any on hand right now?",
 ];
 
 const TODAY = new Intl.DateTimeFormat("en-CA", {

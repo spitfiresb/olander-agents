@@ -65,6 +65,8 @@ function friendlyErrorMessage(error: Error): string {
     return "AI service isn't configured yet. Please contact your admin.";
   if (msg.includes("provider_auth"))
     return "AI provider rejected credentials. Please contact your admin.";
+  if (msg.includes("provider_quota"))
+    return "The AI provider account is out of credits. Retrying won't help — please contact your admin.";
   if (msg.includes("rate_limited"))
     return "AI is busy right now. Try again in a moment.";
   if (msg.includes("provider_unavailable"))

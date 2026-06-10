@@ -13,6 +13,8 @@ import {
   callerHasPricing,
   coerceRowsBySchema,
   isSensitiveColumn,
+  nullifySentinelDates,
+  nullifySentinelDatesLoose,
   PRICING_SCOPE,
   redactSensitiveRows,
 } from "@/lib/ai/p21-fields";
@@ -197,6 +199,11 @@ function finalizeViewResult(
   if (!Array.isArray(obj.rows)) return result;
 
   let rows = coerceRowsBySchema(viewName, obj.rows as Record<string, unknown>[]);
+  // Null P21's "never" date sentinels (e.g. last_sale_date = 1990-01-01) so the
+  // model reads them as "never", not a real ~36-year-old date. Must run before
+  // the model sees the rows — this is the fix for the dead-stock list that
+  // surfaced stocked items and aged them from a placeholder. See p21-fields.ts.
+  rows = nullifySentinelDates(viewName, rows);
   let redactedColumns: string[] = [];
   if (!callerHasPricing(scopes)) {
     const red = redactSensitiveRows(rows);
@@ -373,22 +380,19 @@ function makeEntityGet(scopes: EffectiveScopes, catalog: ScopeCatalog) {
       .map(encodeURIComponent)
       .join("/")}/${encodeURIComponent(id)}${query}`;
     const result = await callProxy("GET", path);
+    if (!result || typeof result !== "object" || "error" in result) return result;
+    // Null P21 "never" date sentinels (e.g. last_sale_date = 1990-01-01) on the
+    // single record too — same fix as viewsQuery, name-gated since an entity
+    // route has no p21_view_* column schema to consult.
+    let record = nullifySentinelDatesLoose(result as Record<string, unknown>);
     // Redact cost/margin fields on the single record for callers without the
     // pricing scope (the parts entity carries cost alongside selling prices).
-    if (
-      !callerHasPricing(scopes) &&
-      result &&
-      typeof result === "object" &&
-      !("error" in result)
-    ) {
-      const { rows, redactedColumns } = redactSensitiveRows([
-        result as Record<string, unknown>,
-      ]);
-      const record = rows[0] as Record<string, unknown>;
+    if (!callerHasPricing(scopes)) {
+      const { rows, redactedColumns } = redactSensitiveRows([record]);
+      record = rows[0] as Record<string, unknown>;
       if (redactedColumns.length) record.redacted_columns = redactedColumns;
-      return record;
     }
-    return result;
+    return record;
   },
   });
 }
@@ -522,7 +526,13 @@ function makeAggregate(scopes: EffectiveScopes, catalog: ScopeCatalog) {
       "complete:true means the figure is EXACT — state it plainly, no hedging. " +
       "complete:false means the scan hit its budget and covers rows_scanned of " +
       "total_count — report it as a sample of that size and offer a tighter " +
-      "filter; never present it as exact. Cost/margin columns need the pricing scope.",
+      "filter; never present it as exact. Grouped results rank by the aggregate " +
+      "(order:'desc' default); pass order:'asc' for the BOTTOM groups and `having` " +
+      "to keep only groups meeting a threshold (e.g. dead stock = max qty_on_hand " +
+      "le 0) — those are the zero/bottom questions a plain ranking can't answer. " +
+      "Big views (inv_loc is 260k rows) only fold COMPLETE when you filter first: " +
+      "a filter that shrinks the scan (e.g. qty_on_hand gt 0) is the difference " +
+      "between complete:true and a partial scan. Cost/margin columns need the pricing scope.",
     inputSchema: z.object({
       viewName: z
         .string()
@@ -536,8 +546,28 @@ function makeAggregate(scopes: EffectiveScopes, catalog: ScopeCatalog) {
           "Same syntax as viewsQuery; datetime'…' literals for dates.",
       ),
       groupBy: SAFE_COLUMN.optional().describe(
-        "Optional column to group by; returns the top groups ranked by the aggregate (desc).",
+        "Optional column to group by; returns the top groups ranked by the aggregate.",
       ),
+      order: z
+        .enum(["asc", "desc"])
+        .optional()
+        .describe(
+          "Rank direction for grouped results. Default 'desc' (biggest first). Use 'asc' " +
+            "for the SMALLEST/BOTTOM groups — slowest movers, least stock, etc.",
+        ),
+      having: z
+        .object({
+          op: z.enum(["eq", "ne", "gt", "ge", "lt", "le"]),
+          value: z.number(),
+        })
+        .optional()
+        .describe(
+          "Keep only groups whose aggregate value meets this predicate — the way to ask " +
+            "for ZEROS/BOTTOMS a top-N ranking can't express. E.g. dead stock = " +
+            "{op:'max',column:'qty_on_hand',groupBy:'item_id',having:{op:'le',value:0}}. " +
+            "Returns groups_matching = how many groups qualified (exact when complete). " +
+            "For summed decimals prefer le/ge thresholds over eq (float equality).",
+        ),
       top: z
         .number()
         .int()
@@ -594,6 +624,8 @@ function makeAggregate(scopes: EffectiveScopes, catalog: ScopeCatalog) {
           groupBy: input.groupBy,
           orderBy: keyCol,
           top: input.top,
+          order: input.order,
+          having: input.having,
         },
       );
       if (!res || typeof res !== "object" || "error" in res) {

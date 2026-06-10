@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getActiveProvider } from "@/lib/ai/model";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -22,7 +23,7 @@ type Day = {
 
 type Window = { checks: number; ok: number; pct: number | null };
 
-type AnthropicCheck = {
+type AiProviderCheck = {
   ok: boolean;
   http_status?: number;
   latency_ms?: number;
@@ -46,13 +47,18 @@ type DropletPayload = {
       p21_reachable: DropletCheckResult;
       tls_cert?: DropletCheckResult & { hours_until_expiry?: number; expires_at?: string };
       proxy_up?: DropletCheckResult & { creds_present?: boolean };
-      anthropic?: AnthropicCheck;
+      anthropic?: AiProviderCheck;
+      openai?: AiProviderCheck;
       p21_api?: P21ApiCheck;
     };
   };
   uptime: Record<"1h" | "24h" | "7d", Window>;
   daily?: Day[];
   anthropic?: {
+    uptime: Record<"1h" | "24h" | "7d", Window>;
+    daily: Day[];
+  };
+  openai?: {
     uptime: Record<"1h" | "24h" | "7d", Window>;
     daily: Day[];
   };
@@ -133,11 +139,15 @@ function buildDays(payload: DropletPayload | null): Day[] {
   return days;
 }
 
-function buildAnthropicDays(payload: DropletPayload | null): Day[] {
+function buildProviderDays(
+  payload: DropletPayload | null,
+  provider: "anthropic" | "openai",
+): Day[] {
   const days = emptyDays();
-  if (!payload?.anthropic?.daily) return days;
+  const daily = payload?.[provider]?.daily;
+  if (!daily) return days;
   const byDate = new Map(days.map((d, i) => [d.date, i]));
-  for (const d of payload.anthropic.daily) {
+  for (const d of daily) {
     const i = byDate.get(d.date);
     if (i !== undefined) days[i] = { ...days[i], pct: d.pct, checks: d.checks, ok: d.ok };
   }
@@ -233,11 +243,22 @@ function buildP21Service(
   };
 }
 
-function buildAnthropicService(payload: DropletPayload | null): Service {
+// AI-provider reachability card. Always reflects the provider the chat route
+// ACTUALLY uses (AI_PROVIDER) — showing Anthropic green while production runs
+// OpenAI hides exactly the outages reps experience. Google has no droplet
+// probe yet; it renders "unknown" rather than a false green.
+function buildAiProviderService(payload: DropletPayload | null): Service {
+  const provider = getActiveProvider();
+  const meta = {
+    anthropic: { name: "Anthropic API", host: "api.anthropic.com" },
+    openai: { name: "OpenAI API", host: "api.openai.com" },
+    google: { name: "Google AI API", host: "generativelanguage.googleapis.com" },
+  }[provider];
+
   const base: Service = {
-    id: "anthropic",
-    name: "Anthropic API",
-    description: "Direct reachability probe of api.anthropic.com",
+    id: "ai_provider",
+    name: meta.name,
+    description: `Direct reachability probe of ${meta.host} (the active chat provider)`,
     state: "unknown",
     message: "—",
     checked_at: null,
@@ -245,24 +266,34 @@ function buildAnthropicService(payload: DropletPayload | null): Service {
     days: emptyDays(),
   };
 
-  const latestAnth = payload?.latest?.checks?.anthropic;
-  if (!latestAnth) {
-    return { ...base, message: "No checks recorded yet" };
+  if (provider === "google") {
+    return { ...base, message: "No droplet probe for this provider yet" };
+  }
+
+  const latestCheck = payload?.latest?.checks?.[provider];
+  if (!latestCheck) {
+    // Pre-upgrade droplet (no probe for this provider yet): render unknown
+    // rather than down — same stance as the p21_api deploy-window handling.
+    return {
+      ...base,
+      message: "Awaiting upgraded droplet probe",
+      checked_at: payload?.latest?.checked_at ?? null,
+    };
   }
 
   // The droplet's unauth'd probe of /v1/models returns 401 when the API is
   // healthy — that's `ok=true`. Failures are timeouts, connection errors,
   // and 5xx. We don't try to distinguish "degraded" from "down" here; the
   // probe is binary.
-  const state: ServiceState = latestAnth.ok ? "operational" : "down";
-  const days = buildAnthropicDays(payload);
+  const state: ServiceState = latestCheck.ok ? "operational" : "down";
+  const days = buildProviderDays(payload, provider);
   return {
     ...base,
     state,
-    message: latestAnth.ok
+    message: latestCheck.ok
       ? "All systems operational"
-      : latestAnth.http_status
-        ? `API returned HTTP ${latestAnth.http_status}`
+      : latestCheck.http_status
+        ? `API returned HTTP ${latestCheck.http_status}`
         : "API unreachable",
     checked_at: payload?.latest?.checked_at ?? null,
     uptime_pct: computeWindowPct(days),
@@ -345,9 +376,9 @@ export async function GET() {
   const { payload, error } = await fetchDropletPayload();
   const p21 = buildP21Service(payload, error);
   const p21Api = buildP21ApiService(payload, error);
-  const anthropic = buildAnthropicService(payload);
+  const aiProvider = buildAiProviderService(payload);
   return NextResponse.json(
-    { fetched_at: new Date().toISOString(), services: [p21, p21Api, anthropic] },
+    { fetched_at: new Date().toISOString(), services: [p21, p21Api, aiProvider] },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

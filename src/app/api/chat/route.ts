@@ -1,4 +1,12 @@
-import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from "ai";
+import {
+  convertToModelMessages,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  stepCountIs,
+  streamText,
+  type LanguageModelUsage,
+  type UIMessage,
+} from "ai";
 import { z } from "zod";
 import { activeSession } from "@/auth";
 import { getGenerationParams, getModel, getModelId } from "@/lib/ai/model";
@@ -17,7 +25,13 @@ import {
   supersedeMessagesFrom,
 } from "@/lib/conversations";
 
-export const maxDuration = 60;
+// 300s, not 60: a multi-step ERP chain (describeView → several viewsQuery
+// pages → aggregate, each up to PROXY_TIMEOUT_MS=25s) can legitimately exceed
+// 60s, and Vercel killing the function mid-stream is exactly the "tool calls
+// ran, then nothing" stall. Requires Fluid Compute (the default for current
+// Vercel projects); if a deploy rejects this value, the project is on the
+// legacy runtime — enable Fluid Compute rather than lowering this back.
+export const maxDuration = 300;
 
 // User-role parts are text OR file — never anything else. The strict shape
 // stops a caller from embedding a forged `tool-result` part that the model
@@ -338,28 +352,32 @@ export async function POST(req: Request) {
 
   const gen = getGenerationParams();
 
+  // SystemModelMessage form lets us mark the prompt for Anthropic's
+  // ephemeral prompt cache. The system prompt + tool definitions are
+  // stable across turns; caching them drops cost ~90% on cached input
+  // tokens and shaves measurable latency off every turn after the first.
+  // The marker is namespaced under `anthropic`, so OpenAI ignores it —
+  // OpenAI models do prefix caching automatically with no marker needed.
+  const systemMessage = {
+    role: "system" as const,
+    content:
+      `Today is ${todayPacific} (Pacific time, America/Los_Angeles). ` +
+      `Use this as the anchor for any "today", "yesterday", "this week", ` +
+      `"last N days", or "next N days" filter you write. Do NOT infer the ` +
+      `date from your training data — the injected date above is authoritative.\n\n` +
+      SYSTEM_PROMPT,
+    providerOptions: {
+      anthropic: { cacheControl: { type: "ephemeral" } },
+    },
+  };
+  const modelMessages = await convertToModelMessages(modelFacingMessages as UIMessage[]);
+  const tools = buildTools(scopes, scopeCatalog);
+
   const result = streamText({
     model,
-    // SystemModelMessage form lets us mark the prompt for Anthropic's
-    // ephemeral prompt cache. The system prompt + tool definitions are
-    // stable across turns; caching them drops cost ~90% on cached input
-    // tokens and shaves measurable latency off every turn after the first.
-    // The marker is namespaced under `anthropic`, so OpenAI ignores it —
-    // GPT-5 does prefix caching automatically with no marker needed.
-    system: {
-      role: "system",
-      content:
-        `Today is ${todayPacific} (Pacific time, America/Los_Angeles). ` +
-        `Use this as the anchor for any "today", "yesterday", "this week", ` +
-        `"last N days", or "next N days" filter you write. Do NOT infer the ` +
-        `date from your training data — the injected date above is authoritative.\n\n` +
-        SYSTEM_PROMPT,
-      providerOptions: {
-        anthropic: { cacheControl: { type: "ephemeral" } },
-      },
-    },
-    messages: await convertToModelMessages(modelFacingMessages as UIMessage[]),
-    tools: buildTools(scopes, scopeCatalog),
+    system: systemMessage,
+    messages: modelMessages,
+    tools,
     // Provider-specific: temperature/verbosity/reasoning differ between
     // Anthropic and GPT-5. See getGenerationParams in lib/ai/model.ts.
     temperature: gen.temperature,
@@ -378,23 +396,25 @@ export async function POST(req: Request) {
     // assistant text — the user sees tool calls and then nothing. Forcing
     // toolChoice 'none' on the last step guarantees a synthesized reply from
     // whatever results it has. Model-agnostic; harmless when the model
-    // finishes earlier on its own.
+    // finishes earlier on its own. (The step-budget case. The other blank-
+    // reply case — the model stopping early with no text — is handled by the
+    // recovery pass in the stream below.)
     prepareStep: ({ stepNumber }) =>
       stepNumber >= 9 ? { toolChoice: "none" } : {},
     abortSignal: req.signal,
     onError: ({ error }) => {
       console.error("[chat] stream error:", mapToFriendlyCode(error), error);
     },
-    onFinish: ({ usage, text, providerMetadata }) => {
+    onFinish: ({ totalUsage, text, providerMetadata }) => {
       const anthMeta = providerMetadata?.anthropic as
         | { cacheCreationInputTokens?: number | null; cacheReadInputTokens?: number | null }
         | undefined;
       console.log("[chat] usage", {
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        cachedInputTokens: usage.cachedInputTokens,
-        reasoningTokens: usage.reasoningTokens,
-        totalTokens: usage.totalTokens,
+        inputTokens: totalUsage.inputTokens,
+        outputTokens: totalUsage.outputTokens,
+        cachedInputTokens: totalUsage.cachedInputTokens,
+        reasoningTokens: totalUsage.reasoningTokens,
+        totalTokens: totalUsage.totalTokens,
         cacheCreationInputTokens: anthMeta?.cacheCreationInputTokens ?? null,
         cacheReadInputTokens: anthMeta?.cacheReadInputTokens ?? null,
       });
@@ -409,22 +429,107 @@ export async function POST(req: Request) {
     },
   });
 
-  return result.toUIMessageStreamResponse({
-    onError: (err) => mapToFriendlyCode(err),
+  // Usage from the recovery pass (below), if it ran — folded into the
+  // persisted usage so the trial spend gate sees the whole turn. Set inside
+  // execute(), read in onFinish(); safe because onFinish only fires after
+  // execute() has completed.
+  let recoveryUsage: LanguageModelUsage | null = null;
+
+  const stream = createUIMessageStream({
+    // Forward the agent loop chunk-by-chunk instead of toUIMessageStreamResponse
+    // so we can append a recovery pass to the SAME assistant message when the
+    // loop produces no visible text. gpt-4.1-mini sometimes ends its tool loop
+    // on a tool result with finishReason "stop" and zero text — under Sonnet
+    // this class never fired, with OpenAI it's the "did all its ERP search,
+    // then nothing" stall. for-await (not writer.merge) keeps chunk ordering
+    // strict across the two phases.
+    execute: async ({ writer }) => {
+      let sawText = false;
+      let sawError = false;
+      // sendFinish: false — we close the message ourselves once we know
+      // whether the recovery pass needs to run.
+      for await (const chunk of result.toUIMessageStream({
+        sendFinish: false,
+        onError: mapToFriendlyCode,
+      })) {
+        if (chunk.type === "text-delta" && chunk.delta.trim().length > 0) {
+          sawText = true;
+        } else if (chunk.type === "error") {
+          sawError = true;
+        }
+        writer.write(chunk);
+      }
+
+      // Blank-answer recovery: the loop finished cleanly but emitted no text.
+      // Re-prompt once with the gathered tool results and tool use disabled —
+      // the model MUST synthesize an answer from what it already has. Skipped
+      // when the stream errored (the composer shows the mapped error + Retry;
+      // a second model call would just fail the same way) or was aborted.
+      if (!sawText && !sawError && !req.signal.aborted) {
+        console.warn("[chat] empty final answer — running synthesis recovery pass");
+        try {
+          const { messages: agentMessages } = await result.response;
+          const recovery = streamText({
+            model,
+            system: systemMessage,
+            messages: [
+              ...modelMessages,
+              ...agentMessages,
+              {
+                role: "user" as const,
+                content:
+                  "Answer my question now using the tool results you already retrieved above. " +
+                  "Do not call any more tools. If the results were insufficient, say what you " +
+                  "found and what you'd need to look up next.",
+              },
+            ],
+            // Tools stay declared (some providers reject tool-call history
+            // without them) but toolChoice none forces a text-only reply.
+            tools,
+            toolChoice: "none",
+            temperature: gen.temperature,
+            maxOutputTokens: gen.maxOutputTokens,
+            providerOptions: gen.providerOptions,
+            abortSignal: req.signal,
+            onError: ({ error }) => {
+              console.error("[chat] recovery stream error:", mapToFriendlyCode(error), error);
+            },
+          });
+          for await (const chunk of recovery.toUIMessageStream({
+            sendStart: false,
+            sendFinish: false,
+            onError: mapToFriendlyCode,
+          })) {
+            writer.write(chunk);
+          }
+          recoveryUsage = await recovery.totalUsage;
+        } catch (err) {
+          console.error("[chat] recovery pass failed:", err);
+        }
+      }
+      writer.write({ type: "finish" });
+    },
+    onError: mapToFriendlyCode,
     onFinish: async ({ responseMessage, isAborted }) => {
       if (isAborted || !userId || !activeConversationId) return;
       try {
-        const usage = await result.usage;
+        // totalUsage, not usage: usage is the LAST step only, which silently
+        // undercounted every multi-step tool turn — the trial spend gate and
+        // the admin usage page were seeing a fraction of real provider spend.
+        const usage = await result.totalUsage;
+        const extra = recoveryUsage;
+        const sum = (a: number | undefined, b: number | undefined) =>
+          a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0);
         await appendMessages(userId, activeConversationId, [
           {
             role: "assistant",
             parts: responseMessage.parts,
             model: getModelId(),
             usage: {
-              inputTokens: usage.inputTokens,
-              outputTokens: usage.outputTokens,
-              cachedInputTokens: usage.cachedInputTokens,
-              totalTokens: usage.totalTokens,
+              inputTokens: sum(usage.inputTokens, extra?.inputTokens),
+              outputTokens: sum(usage.outputTokens, extra?.outputTokens),
+              cachedInputTokens: sum(usage.cachedInputTokens, extra?.cachedInputTokens),
+              totalTokens: sum(usage.totalTokens, extra?.totalTokens),
             },
           },
         ]);
@@ -433,6 +538,8 @@ export async function POST(req: Request) {
       }
     },
   });
+
+  return createUIMessageStreamResponse({ stream });
 }
 
 // IPv4 in the RFC1918 private-network ranges (10/8, 172.16/12, 192.168/16) or
@@ -466,6 +573,18 @@ function mapToFriendlyCode(error: unknown): string {
     lower.includes("401")
   ) {
     return "provider_auth";
+  }
+  // Checked BEFORE rate_limited: OpenAI returns quota exhaustion as a 429
+  // with "insufficient_quota" / "exceeded your current quota … billing",
+  // which is NOT transient — "try again in a moment" is the wrong advice
+  // when the provider account is out of credits. Anthropic's equivalent is
+  // "credit balance is too low".
+  if (
+    lower.includes("quota") ||
+    lower.includes("billing") ||
+    lower.includes("credit balance")
+  ) {
+    return "provider_quota";
   }
   if (
     lower.includes("rate limit") ||

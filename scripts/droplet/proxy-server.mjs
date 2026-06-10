@@ -562,11 +562,30 @@ function aggReduce(op, acc) {
   }
 }
 
+// Post-fold predicate on a group's aggregate value. Lets the caller ask for
+// "groups where the total is 0" (dead stock: max on-hand = 0), "below safety
+// stock", "never sold", etc. — the bottom/zero questions a plain top-N ranking
+// can't express. eq on a fold of floats is exact only for integer columns; for
+// summed decimals prefer le/ge thresholds (documented in the tool).
+const HAVING_OPS = new Set(["eq", "ne", "gt", "ge", "lt", "le"]);
+function havingPass(h, v) {
+  if (!h) return true;
+  switch (h.op) {
+    case "eq": return v === h.value;
+    case "ne": return v !== h.value;
+    case "gt": return v > h.value;
+    case "ge": return v >= h.value;
+    case "lt": return v < h.value;
+    case "le": return v <= h.value;
+    default: return true;
+  }
+}
+
 async function handleAggregate(viewName, body) {
   if (!VIEW_NAME_RE.test(viewName)) {
     return { status: 400, body: { error: "bad_view_name", detail: "view name must match p21_view_*" } };
   }
-  const { op, column, filter, groupBy, orderBy, top } = body ?? {};
+  const { op, column, filter, groupBy, orderBy, top, order, having } = body ?? {};
   if (!["count", "sum", "avg", "min", "max"].includes(op)) {
     return { status: 400, body: { error: "bad_request", detail: "op must be sum|count|avg|min|max" } };
   }
@@ -575,6 +594,25 @@ async function handleAggregate(viewName, body) {
   if (orderBy != null && !AGG_ORDER_RE.test(String(orderBy))) return { status: 400, body: { error: "bad_orderby" } };
   if (op !== "count" && !column) {
     return { status: 400, body: { error: "bad_request", detail: `op ${op} needs a numeric column` } };
+  }
+  // Rank direction for grouped results (default desc = biggest first); asc
+  // surfaces the bottom/smallest groups.
+  if (order != null && order !== "asc" && order !== "desc") {
+    return { status: 400, body: { error: "bad_order", detail: "order must be asc|desc" } };
+  }
+  const groupOrder = order === "asc" ? "asc" : "desc";
+  // Optional post-fold filter on each group's aggregate value.
+  let groupHaving = null;
+  if (having != null) {
+    if (
+      typeof having !== "object" ||
+      !HAVING_OPS.has(having.op) ||
+      typeof having.value !== "number" ||
+      !Number.isFinite(having.value)
+    ) {
+      return { status: 400, body: { error: "bad_having", detail: "having must be {op: eq|ne|gt|ge|lt|le, value: <number>}" } };
+    }
+    groupHaving = { op: having.op, value: having.value };
   }
   const flt = typeof filter === "string" && filter ? filter : undefined;
   const topN = Math.min(Math.max(1, parseInt(top, 10) || 10), 100);
@@ -674,10 +712,17 @@ async function handleAggregate(viewName, body) {
     if (groupBy) {
       out.groupBy = groupBy;
       out.group_count = groups.size;
-      out.groups = [...groups.entries()]
+      const ranked = [...groups.entries()]
         .map(([key, acc]) => ({ key, value: aggReduce(op, acc), n: acc.count }))
         .filter((x) => x.value !== null)
-        .sort((a, b) => b.value - a.value)
+        .filter((x) => havingPass(groupHaving, x.value));
+      // When `having` filters the groups, expose how many matched (exact when
+      // complete=true) so the caller can answer "how many items are dead/below
+      // threshold" without re-deriving it from the truncated top-N list.
+      if (groupHaving) out.groups_matching = ranked.length;
+      out.order = groupOrder;
+      out.groups = ranked
+        .sort((a, b) => (groupOrder === "asc" ? a.value - b.value : b.value - a.value))
         .slice(0, topN);
     } else {
       out.value = aggReduce(op, ungrouped);
