@@ -99,6 +99,7 @@ Update this file when a new class of regression bites us. Promote sections up th
 - [ ] `maxDuration` stays ≥ 300 — multi-step P21 chains (25s proxy timeout per call) regularly exceed 60s, and the function being killed mid-stream is a user-facing stall.
 - [ ] `auth()` gate is still in place; the only bypass is the dev `ALLOW_UNAUTHED_DEV` flag.
 - [ ] Errors return JSON, not throw — frontend expects shaped error responses.
+- [ ] Failed/blank turns are logged to `chat_error` via `logChatError` (`src/lib/chat-errors.ts`) and shown at `/admin/errors`. The write is **fail-safe** — a logging failure (incl. a missing table pre-migration) must be swallowed, never surfaced to the user. Verify: with the `chat_error` table absent, a forced provider error still streams the friendly error to the client and the chat route returns 200, with `[chat-error-log] failed to persist … (swallowed)` in the logs (NOT a 500). This also means the **code can deploy before the migration** (`drizzle/0010_*`) is applied — errors just aren't logged until the table exists. Apply the migration to start capturing.
 
 ### When you change `src/lib/ai/tools.ts` or `system-prompt.ts`
 - [ ] Smoke-test at least one tool-using prompt end-to-end. Tool-call regressions don't show up in lint.

@@ -9,7 +9,8 @@ import {
 } from "ai";
 import { z } from "zod";
 import { activeSession } from "@/auth";
-import { getGenerationParams, getModel, getModelId } from "@/lib/ai/model";
+import { getActiveProvider, getGenerationParams, getModel, getModelId } from "@/lib/ai/model";
+import { logChatError } from "@/lib/chat-errors";
 import { SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
 import { buildTools } from "@/lib/ai/tools";
 import { isExcelMimeType, ownsAttachmentUrl } from "@/lib/blob";
@@ -245,11 +246,32 @@ export async function POST(req: Request) {
     }
   }
 
+  // The query text that triggered this turn, captured once up-front so every
+  // error-log site (setup failure, stream failure, blank answer) can record
+  // *what was asked* even when the turn never gets persisted. getModelId/
+  // getActiveProvider read env and don't throw, so they're safe to call before
+  // the model is constructed.
+  const lastUserText = lastUserTextOf(parsed.data.messages);
+  const activeProvider = getActiveProvider();
+  const activeModelId = getModelId();
+
   let model;
   try {
     model = getModel();
   } catch (err) {
     console.error("[chat] model init failed:", err);
+    // Persist before returning — a misconfigured/failed provider init is a
+    // real "Something went wrong" cause worth seeing at /admin/errors.
+    await logChatError({
+      phase: "setup",
+      error: err,
+      code: "server_misconfigured",
+      httpStatus: 500,
+      userId,
+      provider: activeProvider,
+      model: activeModelId,
+      query: lastUserText,
+    });
     return Response.json({ error: "server_misconfigured" }, { status: 500 });
   }
 
@@ -373,6 +395,13 @@ export async function POST(req: Request) {
   const modelMessages = await convertToModelMessages(modelFacingMessages as UIMessage[]);
   const tools = buildTools(scopes, scopeCatalog);
 
+  // Raw errors captured from the stream callbacks. toUIMessageStream's onError
+  // only yields the MAPPED friendly string to the client; these hold the
+  // underlying provider error (status, body, stack) for /admin/errors. Set in
+  // the onError callbacks, read after the corresponding stream drains.
+  let streamErrorRaw: unknown = null;
+  let recoveryErrorRaw: unknown = null;
+
   const result = streamText({
     model,
     system: systemMessage,
@@ -403,6 +432,7 @@ export async function POST(req: Request) {
       stepNumber >= 9 ? { toolChoice: "none" } : {},
     abortSignal: req.signal,
     onError: ({ error }) => {
+      streamErrorRaw = error;
       console.error("[chat] stream error:", mapToFriendlyCode(error), error);
     },
     onFinish: ({ totalUsage, text, providerMetadata }) => {
@@ -446,6 +476,9 @@ export async function POST(req: Request) {
     execute: async ({ writer }) => {
       let sawText = false;
       let sawError = false;
+      // Tool calls that returned before the failure — the difference between
+      // "died immediately" and "ran N ERP searches, then stalled" in the log.
+      let toolCallCount = 0;
       // sendFinish: false — we close the message ourselves once we know
       // whether the recovery pass needs to run.
       for await (const chunk of result.toUIMessageStream({
@@ -456,8 +489,26 @@ export async function POST(req: Request) {
           sawText = true;
         } else if (chunk.type === "error") {
           sawError = true;
+        } else if (chunk.type === "tool-output-available") {
+          toolCallCount += 1;
         }
         writer.write(chunk);
+      }
+
+      // The main agent loop errored mid-stream — the "Something went wrong"
+      // class. Persist the raw provider error + the query for /admin/errors.
+      if (sawError) {
+        await logChatError({
+          phase: "stream",
+          error: streamErrorRaw,
+          code: mapToFriendlyCode(streamErrorRaw),
+          userId,
+          conversationId: activeConversationId,
+          provider: activeProvider,
+          model: activeModelId,
+          query: lastUserText,
+          toolCallCount,
+        });
       }
 
       // Blank-answer recovery: the loop finished cleanly but emitted no text.
@@ -467,6 +518,7 @@ export async function POST(req: Request) {
       // a second model call would just fail the same way) or was aborted.
       if (!sawText && !sawError && !req.signal.aborted) {
         console.warn("[chat] empty final answer — running synthesis recovery pass");
+        let recoverySawText = false;
         try {
           const { messages: agentMessages } = await result.response;
           const recovery = streamText({
@@ -492,6 +544,7 @@ export async function POST(req: Request) {
             providerOptions: gen.providerOptions,
             abortSignal: req.signal,
             onError: ({ error }) => {
+              recoveryErrorRaw = error;
               console.error("[chat] recovery stream error:", mapToFriendlyCode(error), error);
             },
           });
@@ -500,11 +553,45 @@ export async function POST(req: Request) {
             sendFinish: false,
             onError: mapToFriendlyCode,
           })) {
+            if (chunk.type === "text-delta" && chunk.delta.trim().length > 0) {
+              recoverySawText = true;
+            }
             writer.write(chunk);
           }
           recoveryUsage = await recovery.totalUsage;
         } catch (err) {
+          recoveryErrorRaw = recoveryErrorRaw ?? err;
           console.error("[chat] recovery pass failed:", err);
+        }
+
+        // The turn produced no visible answer even after recovery. Two cases,
+        // both logged so a recurring blank-answer pattern is visible at
+        // /admin/errors (not just a silent empty bubble):
+        //   - recovery itself errored → the raw error.
+        //   - recovery ran clean but still emitted nothing → soft 'blank_answer'.
+        if (recoveryErrorRaw) {
+          await logChatError({
+            phase: "recovery",
+            error: recoveryErrorRaw,
+            code: mapToFriendlyCode(recoveryErrorRaw),
+            userId,
+            conversationId: activeConversationId,
+            provider: activeProvider,
+            model: activeModelId,
+            query: lastUserText,
+            toolCallCount,
+          });
+        } else if (!recoverySawText && !req.signal.aborted) {
+          await logChatError({
+            phase: "blank_answer",
+            code: "blank_answer",
+            userId,
+            conversationId: activeConversationId,
+            provider: activeProvider,
+            model: activeModelId,
+            query: lastUserText,
+            toolCallCount,
+          });
         }
       }
       writer.write({ type: "finish" });
@@ -540,6 +627,24 @@ export async function POST(req: Request) {
   });
 
   return createUIMessageStreamResponse({ stream });
+}
+
+// The text of the most recent user message in the request — the query that
+// triggered this turn. Used only for the diagnostic error log, so it walks the
+// parsed messages directly (the model-facing expansion hasn't run yet) and
+// returns null when the last user turn is attachments-only.
+function lastUserTextOf(
+  messages: z.infer<typeof BodySchema>["messages"],
+): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "user") continue;
+    for (const part of m.parts) {
+      if (part.type === "text" && part.text.trim().length > 0) return part.text;
+    }
+    return null;
+  }
+  return null;
 }
 
 // IPv4 in the RFC1918 private-network ranges (10/8, 172.16/12, 192.168/16) or

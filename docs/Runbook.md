@@ -117,6 +117,33 @@ hostname. Should be empty.
   Entra app secret expired. Generate a new one in Azure portal, update
   Vercel env, redeploy.
 
+## Diagnosing chat errors (the "Something went wrong" reports)
+
+`/status` tells you whether the infrastructure is healthy; it can't tell you
+that *one specific question* failed. For that, sign in as an admin and open
+**`/admin/errors`** (also linked from `/admin`). Each row is a chat turn the
+user saw fail or come back blank:
+
+- **Query** — what the user actually asked.
+- **Error** — the raw provider error (status code, message), not the friendly
+  text the user saw. This is the line to read first.
+- **Phase** — `stream` (model/provider errored mid-answer), `recovery` (the
+  blank-answer retry also failed), `blank_answer` (amber: no exception, just no
+  text — usually a model quirk, not an outage), `setup` (provider init failed).
+- **Code** — the friendly code shown to the user (`stream_error` is the generic
+  "Something went wrong"; `provider_quota` = out of credits; `provider_auth` =
+  bad/expired key; `provider_unavailable` = 5xx/timeout). The `· N tools` note
+  says how many tool calls ran before it died.
+
+Reading the pattern: many `provider_quota` ⇒ top up the provider account. Many
+`provider_unavailable` clustered in time ⇒ a provider incident (cross-check the
+provider status page). Scattered `blank_answer` ⇒ a model-quality issue, not
+infra. An empty page is the goal.
+
+The log is written fail-safe (`src/lib/chat-errors.ts`) — it never blocks or
+breaks a chat. It only captures once the `chat_error` table exists, so after a
+deploy that introduces it, apply the migration (see *Database migrations*).
+
 ## When P21 starts rejecting
 
 1. Confirm droplet's egress IP is still `<proxy-ip>`

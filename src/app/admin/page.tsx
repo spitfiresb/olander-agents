@@ -30,6 +30,18 @@ export default async function AdminPage() {
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <Link
+            href="/admin/errors"
+            className="block rounded-2xl border border-brand-charcoal/10 bg-white p-5 transition-colors hover:border-brand-charcoal/30 hover:bg-brand-sand/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red"
+          >
+            <div className="text-base font-medium text-brand-charcoal">
+              Chat errors
+            </div>
+            <div className="mt-1 text-sm text-brand-ink-soft">
+              Failed or blank chat turns — the query, the raw error, and when.
+            </div>
+          </Link>
+
+          <Link
             href="/admin/audit"
             className="block rounded-2xl border border-brand-charcoal/10 bg-white p-5 transition-colors hover:border-brand-charcoal/30 hover:bg-brand-sand/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red"
           >

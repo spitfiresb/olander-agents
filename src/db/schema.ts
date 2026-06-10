@@ -282,6 +282,59 @@ export const scopeEntities = pgTable(
   ],
 );
 
+// Diagnostic log of FAILED chat turns — one row per turn that errored or came
+// back blank. The product surfaces only a friendly code to the user ("Something
+// went wrong. Please try again."); this table keeps the RAW provider error +
+// the query that triggered it so admins can see *which* question hit *what*
+// error and when (the evidence the status page can't give — that's infra-level,
+// this is per-request). Read-only at /admin/errors.
+//
+// `userId`/`conversationId` are nullable plain text with NO foreign key on
+// purpose: an error can fire before a conversation row exists (or in dev-bypass
+// with no user), and the evidence must outlive a later user/conversation delete
+// — diagnostics shouldn't cascade away. Raw error text is stored in full (it's
+// admin-only and server-side, the same trust level as the existing
+// `console.error` logging); the client never sees these columns. The write path
+// (`logChatError` in src/lib/chat-errors.ts) is fail-safe — it swallows its own
+// errors so logging can never compound the failure it records.
+export const chatErrors = pgTable(
+  "chat_error",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    createdAt: timestamp("createdAt", { mode: "date", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    userId: text("userId"),
+    conversationId: text("conversationId"),
+    // Where in the request lifecycle it failed: 'setup' (before streaming —
+    // e.g. model init), 'stream' (the main agent loop errored), 'recovery' (the
+    // blank-answer recovery pass errored), 'blank_answer' (loop + recovery both
+    // finished clean but produced no visible text — a soft failure, not a throw).
+    phase: text("phase").notNull(),
+    // The friendly code the user's composer mapped to (stream_error,
+    // provider_unavailable, provider_quota, …). 'stream_error' is the generic
+    // "Something went wrong" the CEO reported.
+    code: text("code"),
+    httpStatus: integer("httpStatus"),
+    errorName: text("errorName"),
+    errorMessage: text("errorMessage"),
+    errorStack: text("errorStack"),
+    provider: text("provider"),
+    model: text("model"),
+    // The user's last message text (truncated). Copied from the turn rather than
+    // joined from `message` because an errored turn may never have been
+    // persisted — the row must stand alone for diagnosis.
+    query: text("query"),
+    // How many tool calls completed before the failure — separates "died
+    // immediately" from "ran 4 ERP searches, then stalled".
+    toolCallCount: integer("toolCallCount"),
+    finishReason: text("finishReason"),
+  },
+  (t) => [index("chat_error_created_idx").on(t.createdAt)],
+);
+
 // Flattened audit log of tool calls — denormalized from messages.parts so
 // /admin/audit can grep without loading every assistant message.
 export const toolCalls = pgTable(

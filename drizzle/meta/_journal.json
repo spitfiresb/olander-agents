@@ -71,6 +71,13 @@
       "when": 1780530831390,
       "tag": "0009_calm_zemo",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1781111203480,
+      "tag": "0010_ordinary_lady_deathstrike",
+      "breakpoints": true
     }
   ]
 }
