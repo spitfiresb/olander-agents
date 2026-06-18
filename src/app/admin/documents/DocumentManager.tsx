@@ -111,13 +111,14 @@ export function DocumentManager({
           setError(`${file.name}: unsupported file type`);
           continue;
         }
-        // Direct browser→Blob upload (multipart for big files), authorized by
-        // the token route. Bypasses the serverless body-size limit.
+        // Direct browser→Blob upload, authorized by the token route. Bypasses
+        // the serverless body-size limit. A single PUT (no multipart) is the
+        // reliable path at our file sizes — multipart's multi-step handshake
+        // was stalling the upload before it could complete.
         const blob = await upload(`${REFERENCE_DOC_PREFIX}/${file.name}`, file, {
           access: "public",
           handleUploadUrl: "/api/admin/documents/token",
           contentType: mediaType,
-          multipart: true,
         });
         // Record + kick off ingestion.
         const res = await fetch("/api/admin/documents", {
