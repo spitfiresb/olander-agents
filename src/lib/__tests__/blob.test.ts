@@ -20,6 +20,16 @@ describe("isAllowedMimeType", () => {
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       ),
     ).toBe(true);
+    expect(
+      isAllowedMimeType(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ),
+    ).toBe(true);
+    expect(
+      isAllowedMimeType(
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      ),
+    ).toBe(true);
   });
 
   test("rejects unsupported types", () => {

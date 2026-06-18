@@ -11,7 +11,12 @@ const UserTextPart = z.object({
 });
 
 const ALLOWED_FILE_MIME_RE =
-  /^(image\/(png|jpe?g|webp|gif)|application\/pdf|text\/(plain|csv|tab-separated-values)|application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|application\/vnd\.ms-excel)$/;
+  /^(image\/(png|jpe?g|webp|gif)|application\/pdf|text\/(plain|csv|tab-separated-values)|application\/vnd\.openxmlformats-officedocument\.(spreadsheetml\.sheet|wordprocessingml\.document|presentationml\.presentation)|application\/vnd\.ms-excel)$/;
+
+// Mirror of MAX_UPLOAD_CEILING_BYTES (src/lib/blob.ts) — the schema's secondary
+// size guard. The effective per-file limit is the smaller, admin-configurable
+// value enforced by the uploads route.
+const MAX_UPLOAD_CEILING_BYTES = 50 * 1024 * 1024;
 
 const UserFilePart = z.object({
   type: z.literal("file"),
@@ -25,7 +30,7 @@ const UserFilePart = z.object({
     .number()
     .int()
     .nonnegative()
-    .max(10 * 1024 * 1024)
+    .max(MAX_UPLOAD_CEILING_BYTES)
     .optional(),
 });
 
@@ -143,17 +148,48 @@ describe("/api/chat BodySchema", () => {
     expect(result.success).toBe(false);
   });
 
-  test("rejects a file part exceeding the 10MB size cap", () => {
+  test("accepts Word and PowerPoint file parts", () => {
+    for (const mediaType of [
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ]) {
+      const ok = BodySchema.safeParse({
+        messages: [
+          {
+            id: "m1",
+            role: "user",
+            parts: [{ ...sampleFilePart, mediaType }],
+          },
+        ],
+      });
+      expect(ok.success).toBe(true);
+    }
+  });
+
+  test("rejects a file part exceeding the ceiling size cap", () => {
     const result = BodySchema.safeParse({
       messages: [
         {
           id: "m1",
           role: "user",
-          parts: [{ ...sampleFilePart, size: 11 * 1024 * 1024 }],
+          parts: [{ ...sampleFilePart, size: MAX_UPLOAD_CEILING_BYTES + 1 }],
         },
       ],
     });
     expect(result.success).toBe(false);
+  });
+
+  test("accepts a file part at a size the old 10MB cap rejected", () => {
+    const ok = BodySchema.safeParse({
+      messages: [
+        {
+          id: "m1",
+          role: "user",
+          parts: [{ ...sampleFilePart, size: 20 * 1024 * 1024 }],
+        },
+      ],
+    });
+    expect(ok.success).toBe(true);
   });
 
   test("caps message count at 50", () => {

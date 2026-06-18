@@ -7,7 +7,12 @@ import { del, put } from "@vercel/blob";
 // see CLAUDE.local.md "My scope" for the namespacing decision.
 
 export const ATTACHMENT_PREFIX = "chat-attachments";
-export const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB per file
+// Absolute hard ceiling on an upload. The *effective* per-file limit is
+// admin-configurable (src/lib/upload-settings.ts) and defaults to 25 MB; this
+// constant is the cap that limit can never exceed — a safety backstop in
+// uploadAttachment and the chat-route schema. Keep it below Vercel's
+// serverless request-body limit for the upload function.
+export const MAX_UPLOAD_CEILING_BYTES = 50 * 1024 * 1024; // 50 MB hard ceiling
 export const MAX_FILENAME_LEN = 160;
 
 const ALLOWED_MIME = new Set<string>([
@@ -22,6 +27,8 @@ const ALLOWED_MIME = new Set<string>([
   "text/plain",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
   "application/vnd.ms-excel", // .xls
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation", // .pptx
 ]);
 
 export type UploadedAttachment = {
@@ -73,7 +80,10 @@ export async function uploadAttachment(
   file: File,
   userId: string,
 ): Promise<UploadedAttachment> {
-  if (file.size > MAX_FILE_BYTES) {
+  // Backstop only — the route enforces the admin-configured limit first. This
+  // guards the absolute ceiling so a misconfigured limit can't accept a file
+  // larger than the platform can serve.
+  if (file.size > MAX_UPLOAD_CEILING_BYTES) {
     throw new Error("file_too_large");
   }
   if (!isAllowedMimeType(file.type)) {

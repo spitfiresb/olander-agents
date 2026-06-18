@@ -195,6 +195,22 @@ export const trialBudget = pgTable("trial_budget", {
   updatedBy: text("updatedBy"),
 });
 
+// Single-row ("singleton") table holding the admin-configurable max upload
+// size, in whole megabytes. Unlike trial_budget there IS an in-app control:
+// /admin/uploads writes `max_file_mb` here (clamped to the bounds in
+// src/lib/upload-settings.ts). Reads fail-open to the default if the row is
+// missing, so the feature works before the seed lands and never takes uploads
+// down on a DB hiccup. The hard ceiling lives in code
+// (MAX_UPLOAD_CEILING_BYTES in src/lib/blob.ts) — this value can't exceed it.
+export const uploadSettings = pgTable("upload_settings", {
+  id: text("id").primaryKey().default("singleton"),
+  maxFileMb: integer("max_file_mb").notNull().default(25),
+  updatedAt: timestamp("updatedAt", { mode: "date", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedBy: text("updatedBy"),
+});
+
 // Catalog row metadata — one row per inv_mast_uid mirroring p21_view_inv_mast.
 // The actual vector lives in Qdrant (see src/lib/ai/qdrant.ts) keyed on the
 // same inv_mast_uid. This table carries:

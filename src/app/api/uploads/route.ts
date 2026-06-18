@@ -3,9 +3,9 @@ import {
   ATTACHMENT_PREFIX,
   deleteAttachment,
   isAllowedMimeType,
-  MAX_FILE_BYTES,
   uploadAttachment,
 } from "@/lib/blob";
+import { getMaxUploadBytes } from "@/lib/upload-settings";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { isSameOrigin } from "@/lib/csrf";
 
@@ -51,7 +51,11 @@ export async function POST(req: Request) {
   if (file.size === 0) {
     return Response.json({ error: "bad_request" }, { status: 400 });
   }
-  if (file.size > MAX_FILE_BYTES) {
+  // Admin-configurable per-file cap (src/lib/upload-settings.ts; default 25 MB,
+  // hard-ceilinged at MAX_UPLOAD_CEILING_BYTES). Fails open to the default on a
+  // DB error rather than blocking uploads.
+  const maxBytes = await getMaxUploadBytes();
+  if (file.size > maxBytes) {
     return Response.json({ error: "file_too_large" }, { status: 413 });
   }
   if (!isAllowedMimeType(file.type)) {

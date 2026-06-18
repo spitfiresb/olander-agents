@@ -78,7 +78,10 @@ export function getGenerationParams(): {
       };
     }
     // Non-reasoning OpenAI models: temperature like Anthropic, no reasoning opts.
-    return { temperature: 0.2, maxOutputTokens: 2048, providerOptions: undefined };
+    // 4096 (was 2048) so longer answers — e.g. summarizing an attached document
+    // — don't truncate mid-sentence. Still well under the chat route's 300s
+    // function timeout.
+    return { temperature: 0.2, maxOutputTokens: 4096, providerOptions: undefined };
   }
   if (resolveProvider() === "google") {
     // Gemini takes a temperature and ignores the OpenAI-specific params. 2.5
@@ -89,10 +92,11 @@ export function getGenerationParams(): {
   }
   return {
     temperature: 0.2,
-    // Any factual lookup answer should fit comfortably; if a real question
-    // truncates, raise here rather than letting the long tail blow past the
-    // chat route's 300s function timeout.
-    maxOutputTokens: 2048,
+    // 4096 (was 2048) so longer answers — e.g. summarizing an attached
+    // document — don't truncate. If a real question still truncates, raise
+    // here rather than letting the long tail blow past the chat route's 300s
+    // function timeout.
+    maxOutputTokens: 4096,
     providerOptions: undefined,
   };
 }

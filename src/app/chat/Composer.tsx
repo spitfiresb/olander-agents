@@ -42,6 +42,8 @@ const ACCEPT_MIME = [
   "text/tab-separated-values",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ].join(",");
 
 type Props = {
@@ -67,6 +69,8 @@ function friendlyErrorMessage(error: Error): string {
     return "AI provider rejected credentials. Please contact your admin.";
   if (msg.includes("provider_quota"))
     return "The AI provider account is out of credits. Retrying won't help — please contact your admin.";
+  if (msg.includes("context_too_large"))
+    return "That file or message is too large for the AI to read in one go. Try a smaller file (or fewer pages) and send again.";
   if (msg.includes("rate_limited"))
     return "AI is busy right now. Try again in a moment.";
   if (msg.includes("provider_unavailable"))
