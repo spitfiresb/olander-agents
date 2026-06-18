@@ -64,9 +64,13 @@ async function main() {
     if (!mime) throw new Error(`no mime mapping for extension "${ext}"`);
     const buf = readFileSync(fileArg);
     console.log(`[smoke-docs] extracting ${basename(fileArg)} (${mime}) …`);
-    text = await extractTextFromBuffer(buf, mime);
+    const extracted = await extractTextFromBuffer(buf, mime);
+    text = extracted.text;
     label = basename(fileArg);
-    console.log(`[smoke-docs] extracted ${text.length.toLocaleString()} chars`);
+    console.log(
+      `[smoke-docs] extracted ${text.length.toLocaleString()} chars` +
+        (extracted.pageCount !== null ? ` from ${extracted.pageCount} pages` : ""),
+    );
   } else {
     text = SYNTHETIC;
     label = "synthetic-handbook.txt";

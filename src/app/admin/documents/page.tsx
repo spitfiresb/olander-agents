@@ -34,8 +34,8 @@ export default async function DocumentsPage() {
           Upload company documents (policies, manuals, the employee handbook,
           quality procedures, product catalogs) for the assistant to search and
           cite in chat. Supported: PDF, Word, PowerPoint, Excel, and text/CSV.
-          Large files like catalogs are fine. Scanned or image-only PDFs
-          can&apos;t be read yet.
+          Large files like catalogs are fine. PDFs must have selectable text.
+          Scanned or image-only PDFs can&apos;t be read.
         </p>
 
         <div className="mt-6">

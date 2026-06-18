@@ -2,6 +2,7 @@ import { after } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { isSameOrigin } from "@/lib/csrf";
+import { MAX_DOC_BYTES } from "@/lib/document-limits";
 import { isReferenceDocMime } from "@/lib/extract";
 import {
   createReferenceDocument,
@@ -9,6 +10,7 @@ import {
   listReferenceDocuments,
   processReferenceDocument,
   REFERENCE_DOC_PREFIX,
+  requeueReferenceDocument,
 } from "@/lib/documents";
 
 // 300s so the post-response ingestion (extract → chunk → embed → upsert) run by
@@ -31,7 +33,7 @@ const CreateBody = z.object({
   blobPathname: z.string().min(1).max(1024),
   filename: z.string().min(1).max(255),
   mediaType: z.string().min(1).max(128),
-  sizeBytes: z.number().int().nonnegative().max(200 * 1024 * 1024),
+  sizeBytes: z.number().int().nonnegative().max(MAX_DOC_BYTES),
 });
 
 // SSRF gate: the URL is fetched server-side during ingestion, so it must point
@@ -98,6 +100,41 @@ export async function POST(req: Request) {
   });
 
   return Response.json({ document: doc }, { status: 201 });
+}
+
+const RetryBody = z.object({
+  id: z.string().min(1).max(64),
+});
+
+// Re-run ingestion for a failed/stuck document against the blob already in
+// storage — no re-upload needed. Resets the row to 'processing' (so the UI shows
+// it working and resumes polling) and kicks off the same after() ingest as POST.
+export async function PATCH(req: Request) {
+  if (!isSameOrigin(req.headers)) {
+    return Response.json({ error: "bad_request" }, { status: 400 });
+  }
+  const admin = await requireAdmin();
+  if (!admin) return Response.json({ error: "forbidden" }, { status: 403 });
+
+  let raw: unknown;
+  try {
+    raw = await req.json();
+  } catch {
+    return Response.json({ error: "bad_request" }, { status: 400 });
+  }
+  const parsed = RetryBody.safeParse(raw);
+  if (!parsed.success) {
+    return Response.json({ error: "bad_request" }, { status: 400 });
+  }
+
+  const doc = await requeueReferenceDocument(parsed.data.id);
+  if (!doc) return Response.json({ error: "not_found" }, { status: 404 });
+
+  after(async () => {
+    await processReferenceDocument(doc.id);
+  });
+
+  return Response.json({ document: doc });
 }
 
 export async function DELETE(req: Request) {

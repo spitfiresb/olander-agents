@@ -1,9 +1,14 @@
 import { del } from "@vercel/blob";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { referenceDocuments } from "@/db/schema";
 import { chunkText, MAX_CHUNKS } from "@/lib/ai/chunk";
 import { embedDocuments, embedQuery } from "@/lib/ai/embeddings";
+import {
+  MAX_DOC_WORDS,
+  SCAN_CHECK_MIN_PAGES,
+  SCAN_MIN_WORDS_PER_PAGE,
+} from "@/lib/document-limits";
 import {
   deleteDocChunks,
   searchDocsByVector,
@@ -29,6 +34,13 @@ export const REFERENCE_DOC_PREFIX = "reference-docs";
 // per-request token ceiling and to upsert incrementally on large documents.
 const EMBED_BATCH = 96;
 
+// A background ingest (run via `after()` in the upload route) is bounded by that
+// route's maxDuration (300s). If a row is still 'processing' well past that, the
+// job wasn't merely slow. It was killed (deploy, crash, or a file too large to
+// finish in the budget) before its own try/catch could record the failure, and
+// it will never resolve itself. failStaleProcessing() sweeps those to 'failed'.
+const PROCESSING_TIMEOUT_MS = 6 * 60 * 1000; // 300s cap + margin
+
 export type ReferenceDocument = typeof referenceDocuments.$inferSelect;
 
 export type DocumentPassage = {
@@ -37,7 +49,31 @@ export type DocumentPassage = {
   score: number;
 };
 
+// Resolve ingests that overran the background-job budget. This is the only thing
+// that settles a job whose process was killed before its own catch block could
+// mark it failed (a dead function never runs its catch). Measured from
+// `updatedAt` so a retry is timed from when it was re-queued, not the original
+// upload. Runs on read: the admin UI polls the list, so no cron is needed.
+async function failStaleProcessing(): Promise<void> {
+  const cutoff = new Date(Date.now() - PROCESSING_TIMEOUT_MS);
+  await db
+    .update(referenceDocuments)
+    .set({
+      status: "failed",
+      error:
+        "Indexing timed out. The file may be too large to finish in time, or the job was interrupted. Try again, or upload a smaller file.",
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(referenceDocuments.status, "processing"),
+        lt(referenceDocuments.updatedAt, cutoff),
+      ),
+    );
+}
+
 export async function listReferenceDocuments(): Promise<ReferenceDocument[]> {
+  await failStaleProcessing();
   return db
     .select()
     .from(referenceDocuments)
@@ -81,11 +117,59 @@ export async function createReferenceDocument(input: {
   return row;
 }
 
+// Count words without allocating a giant array; the extracted text can be tens
+// of MB, and we only need the count. Walks the string once tracking word starts.
+function countWords(text: string): number {
+  let count = 0;
+  let inWord = false;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    // space, tab, newline, carriage return, vertical tab, form feed
+    const isSpace =
+      code === 32 ||
+      code === 9 ||
+      code === 10 ||
+      code === 13 ||
+      code === 11 ||
+      code === 12;
+    if (isSpace) {
+      inWord = false;
+    } else if (!inWord) {
+      inWord = true;
+      count++;
+    }
+  }
+  return count;
+}
+
 async function markFailed(id: string, error: string): Promise<void> {
   await db
     .update(referenceDocuments)
-    .set({ status: "failed", error: error.slice(0, 1000), updatedAt: new Date() })
+    .set({
+      status: "failed",
+      error: error.slice(0, 1000),
+      updatedAt: new Date(),
+    })
     .where(eq(referenceDocuments.id, id));
+}
+
+// Flag a PDF that almost certainly has no real text layer: enough pages to
+// judge, but averaging fewer than SCAN_MIN_WORDS_PER_PAGE words/page. Returns a
+// note quoting the real words-per-page figure (carried in the row's `error`
+// field and shown amber on the 'ready' row) or null. Non-PDF formats have no
+// page count, so they never trip this.
+function scanWarning(
+  words: number,
+  pageCount: number | null,
+): string | null {
+  if (pageCount === null || pageCount < SCAN_CHECK_MIN_PAGES) return null;
+  const wordsPerPage = words / pageCount;
+  if (wordsPerPage >= SCAN_MIN_WORDS_PER_PAGE) return null;
+  return `This PDF has only about ${Math.round(
+    wordsPerPage,
+  )} words of readable text per page across ${pageCount.toLocaleString(
+    "en-US",
+  )} pages, which usually means it's a scan or page images rather than real text. Only that readable text was added to the search index, so most of the document can't be found in chat.`;
 }
 
 // Extract → chunk → embed → upsert. Idempotent-ish: on re-run it clears any
@@ -99,13 +183,33 @@ export async function processReferenceDocument(id: string): Promise<void> {
     // Clear any partial/previous chunks so a retry is clean.
     await deleteDocChunks(id);
 
-    const text = await fetchAndExtractText(doc.blobUrl, doc.mediaType);
+    const { text, pageCount } = await fetchAndExtractText(
+      doc.blobUrl,
+      doc.mediaType,
+    );
+
+    // Length gate BEFORE embedding (the paid step): an over-long document is
+    // rejected outright, never partially indexed, and costs nothing to refuse.
+    // Phrased for a non-technical admin: words, not chunks/tokens.
+    const words = countWords(text);
+    if (words > MAX_DOC_WORDS) {
+      await markFailed(
+        id,
+        `This document is too long to add to the library. It has about ${words.toLocaleString(
+          "en-US",
+        )} words and the limit is ${MAX_DOC_WORDS.toLocaleString(
+          "en-US",
+        )}. Try splitting it into smaller documents.`,
+      );
+      return;
+    }
+
     const chunks = chunkText(text);
 
     if (chunks.length === 0) {
       await markFailed(
         id,
-        "No extractable text — the file may be image-only/scanned (OCR isn't supported yet) or empty. Try a text-based version.",
+        "No extractable text. The file may be image-only or scanned. Try a text-based version.",
       );
       return;
     }
@@ -128,9 +232,21 @@ export async function processReferenceDocument(id: string): Promise<void> {
       written += points.length;
     }
 
+    // Indexed successfully, but flag a likely-scanned PDF so the admin knows the
+    // search index only holds the sliver of text we could read. Non-blocking:
+    // the row stays 'ready' and the extracted text is searchable. The note rides
+    // in `error` (null when there's nothing to flag); the UI colors it amber on
+    // a 'ready' row and red on a 'failed' one, so one field serves both.
+    const note = scanWarning(words, pageCount);
+
     await db
       .update(referenceDocuments)
-      .set({ status: "ready", chunkCount: written, error: null, updatedAt: new Date() })
+      .set({
+        status: "ready",
+        chunkCount: written,
+        error: note,
+        updatedAt: new Date(),
+      })
       .where(eq(referenceDocuments.id, id));
 
     if (chunks.length >= MAX_CHUNKS) {
@@ -142,6 +258,22 @@ export async function processReferenceDocument(id: string): Promise<void> {
     console.error("[documents] ingest failed:", doc.filename, err);
     await markFailed(id, err instanceof Error ? err.message : String(err));
   }
+}
+
+// Reset a document to 'processing' so its ingest can be re-run after a
+// failure/timeout. Bumps updatedAt so the stale-processing sweep times the retry
+// from now, not the original upload. The caller kicks off
+// processReferenceDocument, which is idempotent (it clears prior chunks first).
+// Returns null if the id no longer exists.
+export async function requeueReferenceDocument(
+  id: string,
+): Promise<ReferenceDocument | null> {
+  const [row] = await db
+    .update(referenceDocuments)
+    .set({ status: "processing", error: null, updatedAt: new Date() })
+    .where(eq(referenceDocuments.id, id))
+    .returning();
+  return row ?? null;
 }
 
 // Remove a document everywhere: Qdrant chunks first (so search can't return a

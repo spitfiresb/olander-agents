@@ -216,7 +216,9 @@ export const uploadSettings = pgTable("upload_settings", {
 // (see src/lib/ai/qdrant-docs.ts), keyed by this row's `id` in the chunk
 // payload's `document_id`. The original file lives in Vercel Blob at `blobUrl`.
 // `status` tracks ingestion: 'processing' (uploaded, embedding in progress) →
-// 'ready' (searchable) or 'failed' (see `error`). Managed at /admin/documents.
+// 'ready' (searchable) or 'failed' (see `error`); a 'ready' row may also carry
+// a non-blocking note in `error` (e.g. a likely-scanned PDF). Managed at
+// /admin/documents.
 // Deliberately mirrors the catalog split: row metadata in Neon, vectors in
 // Qdrant, original bytes in Blob.
 export const referenceDocuments = pgTable(
@@ -235,6 +237,10 @@ export const referenceDocuments = pgTable(
       .notNull()
       .default("processing"),
     chunkCount: integer("chunkCount").notNull().default(0),
+    // Human-readable note for the row's current state. On 'failed' it's the
+    // failure reason (shown red); on 'ready' it's an optional non-blocking
+    // caveat such as a likely-scanned PDF (shown amber). A row is only ever in
+    // one of those states, so a single field serves both. Null when clean.
     error: text("error"),
     uploadedBy: text("uploadedBy"),
     createdAt: timestamp("createdAt", { mode: "date", withTimezone: true })
