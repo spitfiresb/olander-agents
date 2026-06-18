@@ -4,7 +4,9 @@ import type { NextConfig } from "next";
 //   - Scripts: self only (Next.js inlines hydration bootstrap as a nonce-less
 //     inline script, so 'unsafe-inline' is required for App Router until
 //     Next ships nonce support across the framework's own scripts).
-//   - Connect: self plus Anthropic API endpoints for streamed responses.
+//   - Connect: self, the Anthropic API (streamed responses), and Vercel Blob
+//     hosts (vercel.com/api/blob + *.public.blob.vercel-storage.com) so the
+//     /admin/documents client-side upload can reach storage from the browser.
 //   - Img: self + data: for inline SVG, plus the Microsoft Graph CDN for
 //     account photos.
 //   - Frames: none.
@@ -31,7 +33,7 @@ const CSP = [
   "font-src 'self' data:",
   "style-src 'self' 'unsafe-inline'",
   scriptSrc,
-  "connect-src 'self' https://api.anthropic.com",
+  "connect-src 'self' https://api.anthropic.com https://vercel.com https://blob.vercel-storage.com https://*.public.blob.vercel-storage.com",
   "upgrade-insecure-requests",
 ].join("; ");
 
