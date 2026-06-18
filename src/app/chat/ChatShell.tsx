@@ -36,21 +36,39 @@ const ALLOWED_MIME = new Set<string>([
   "text/tab-separated-values",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ]);
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
-const MAX_TOTAL_BYTES = 25 * 1024 * 1024;
+// Fallback when the server-resolved per-file limit isn't passed in (matches the
+// upload-settings default). The real cap is admin-configurable and arrives via
+// the maxUploadBytes prop; the server re-validates authoritatively either way.
+const DEFAULT_MAX_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_FILE_COUNT = 5;
 
 type Props = {
   initialConversationId?: string;
   initialMessages?: UIMessage[];
   isAdmin?: boolean;
+  // Admin-configurable per-file upload limit, resolved server-side and passed
+  // in so the client pre-check + UI copy match what the server will accept.
+  maxUploadBytes?: number;
   // TEMPORARY trial gate (src/lib/trial.ts). Undefined when the feature is
   // retired/disabled — then neither the banner nor the blocked panel renders.
   trial?: TrialBannerData;
 };
 
-export function ChatShell({ initialConversationId, initialMessages, isAdmin, trial }: Props) {
+export function ChatShell({
+  initialConversationId,
+  initialMessages,
+  isAdmin,
+  maxUploadBytes,
+  trial,
+}: Props) {
+  const maxFileBytes = maxUploadBytes ?? DEFAULT_MAX_FILE_BYTES;
+  // Total across all chips: at least the per-file limit (so one max-size file
+  // always fits) but never below a 25 MB floor for multi-file batches.
+  const maxTotalBytes = Math.max(maxFileBytes, 25 * 1024 * 1024);
+  const maxFileMb = Math.round(maxFileBytes / (1024 * 1024));
   const router = useRouter();
   // Lives outside React state so the transport's body callback (which fires
   // outside the React render path) can read the current id without a
@@ -206,7 +224,7 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin, tri
       const msg = err instanceof Error ? err.message : "upload_failed";
       const friendly =
         msg === "file_too_large"
-          ? "Too large (10 MB max)"
+          ? `Too large (max ${maxFileMb} MB)`
           : msg === "unsupported_mime"
             ? "Unsupported type"
             : msg === "rate_limited"
@@ -231,16 +249,18 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin, tri
           rejections.push(`${file.name}: unsupported type`);
           continue;
         }
-        if (file.size > MAX_FILE_BYTES) {
-          rejections.push(`${file.name}: too large (10 MB max)`);
+        if (file.size > maxFileBytes) {
+          rejections.push(`${file.name}: too large (max ${maxFileMb} MB)`);
           continue;
         }
         if (next.length >= MAX_FILE_COUNT) {
-          rejections.push(`${file.name}: max 5 files per message`);
+          rejections.push(`${file.name}: max ${MAX_FILE_COUNT} files per message`);
           continue;
         }
-        if (runningTotal + file.size > MAX_TOTAL_BYTES) {
-          rejections.push(`${file.name}: total exceeds 25 MB`);
+        if (runningTotal + file.size > maxTotalBytes) {
+          rejections.push(
+            `${file.name}: total exceeds ${Math.round(maxTotalBytes / (1024 * 1024))} MB`,
+          );
           continue;
         }
         const id =
@@ -693,7 +713,7 @@ export function ChatShell({ initialConversationId, initialMessages, isAdmin, tri
                 Drop files to attach
               </div>
               <div className="mt-1 text-xs text-brand-ink-soft">
-                Images, PDFs, or spreadsheets — up to 10 MB each, 5 per message
+                Images, PDFs, or documents — up to {maxFileMb} MB each, {MAX_FILE_COUNT} per message
               </div>
             </div>
           </div>

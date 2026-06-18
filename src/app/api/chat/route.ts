@@ -13,8 +13,9 @@ import { getActiveProvider, getGenerationParams, getModel, getModelId } from "@/
 import { logChatError } from "@/lib/chat-errors";
 import { SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
 import { buildTools } from "@/lib/ai/tools";
-import { isExcelMimeType, ownsAttachmentUrl } from "@/lib/blob";
+import { isExcelMimeType, MAX_UPLOAD_CEILING_BYTES, ownsAttachmentUrl } from "@/lib/blob";
 import { fetchAndConvertExcel } from "@/lib/excel";
+import { fetchAndConvertOffice, isOfficeDocMimeType } from "@/lib/office";
 import { effectiveScopes, loadScopeCatalog } from "@/lib/scopes";
 import { getTrialStatus } from "@/lib/trial";
 import { checkRateLimit } from "@/lib/rate-limit";
@@ -57,7 +58,7 @@ const UserTextPart = z.object({
 // it verbatim, and a shared import would couple the schema test to the
 // blob module's side effects.
 const ALLOWED_FILE_MIME_RE =
-  /^(image\/(png|jpe?g|webp|gif)|application\/pdf|text\/(plain|csv|tab-separated-values)|application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|application\/vnd\.ms-excel)$/;
+  /^(image\/(png|jpe?g|webp|gif)|application\/pdf|text\/(plain|csv|tab-separated-values)|application\/vnd\.openxmlformats-officedocument\.(spreadsheetml\.sheet|wordprocessingml\.document|presentationml\.presentation)|application\/vnd\.ms-excel)$/;
 
 const UserFilePart = z.object({
   type: z.literal("file"),
@@ -67,11 +68,14 @@ const UserFilePart = z.object({
     .regex(ALLOWED_FILE_MIME_RE, "unsupported mediaType"),
   url: z.string().url().max(1024),
   filename: z.string().max(255),
+  // Secondary guard on an already-uploaded file's declared size. The upload
+  // route is the real gate (it enforces the admin-configured limit on the
+  // actual bytes); here we only reject anything above the absolute ceiling.
   size: z
     .number()
     .int()
     .nonnegative()
-    .max(10 * 1024 * 1024)
+    .max(MAX_UPLOAD_CEILING_BYTES)
     .optional(),
 });
 
@@ -111,14 +115,17 @@ const BodySchema = z.object({
 type ParsedUserMessage = z.infer<typeof UserMessage>;
 type ParsedUserPart = ParsedUserMessage["parts"][number];
 
-// Walk a user message and replace Excel file parts with synthesized CSV
-// text parts. The original file part is still in `message.parts` saved to
-// the DB (persistence happens upstream of this), so the user-bubble chip
-// keeps its download link in history; the model just sees the CSV.
+// Walk a user message and replace file parts the model can't read natively
+// with synthesized text parts:
+//   - Excel (.xlsx/.xls) → CSV
+//   - Word (.docx) / PowerPoint (.pptx) → extracted plain text
+// The original file part is still in `message.parts` saved to the DB
+// (persistence happens upstream of this), so the user-bubble chip keeps its
+// download link in history; the model just sees the text.
 //
-// PDFs and images flow through unchanged — Anthropic accepts them natively
-// and the AI SDK's convertToModelMessages handles the provider mapping.
-async function expandExcelPartsForModel(
+// PDFs and images flow through unchanged — providers accept them natively and
+// the AI SDK's convertToModelMessages handles the provider mapping.
+async function expandAttachmentsForModel(
   message: ParsedUserMessage,
 ): Promise<ParsedUserMessage> {
   const out: ParsedUserPart[] = [];
@@ -135,6 +142,22 @@ async function expandExcelPartsForModel(
         out.push({
           type: "text",
           text: `[Attached spreadsheet \`${part.filename}\` could not be read. Tell the user the file may be corrupted and ask them to retry.]`,
+        });
+      }
+    } else if (part.type === "file" && isOfficeDocMimeType(part.mediaType)) {
+      try {
+        const text = await fetchAndConvertOffice(part.url, part.mediaType);
+        out.push({
+          type: "text",
+          text: text
+            ? `Attached document \`${part.filename}\` (extracted text):\n\n${text}`
+            : `[Attached document \`${part.filename}\` contained no extractable text — it may be image-only. Tell the user to share a text-based version or paste the relevant content.]`,
+        });
+      } catch (err) {
+        console.error("[chat] office conversion failed:", part.filename, err);
+        out.push({
+          type: "text",
+          text: `[Attached document \`${part.filename}\` could not be read. Tell the user the file may be corrupted and ask them to retry.]`,
         });
       }
     } else {
@@ -356,7 +379,7 @@ export async function POST(req: Request) {
   // its URL, so the user-bubble chip keeps its download link on reload.
   const modelFacingMessages = await Promise.all(
     parsed.data.messages.map(async (m) =>
-      m.role === "user" ? await expandExcelPartsForModel(m) : m,
+      m.role === "user" ? await expandAttachmentsForModel(m) : m,
     ),
   );
 
@@ -678,6 +701,21 @@ function mapToFriendlyCode(error: unknown): string {
     lower.includes("401")
   ) {
     return "provider_auth";
+  }
+  // Input that overflowed the model's context window — most often an attached
+  // document too large to read in one turn. Both providers word this
+  // differently: OpenAI "maximum context length is N tokens" /
+  // "context_length_exceeded"; Anthropic "prompt is too long: N tokens >
+  // 200000 maximum". Checked early so it isn't swallowed by the generic
+  // stream_error fallback (it shares no wording with the quota/rate strings).
+  if (
+    lower.includes("context length") ||
+    lower.includes("context_length_exceeded") ||
+    lower.includes("context window") ||
+    lower.includes("maximum context") ||
+    lower.includes("prompt is too long")
+  ) {
+    return "context_too_large";
   }
   // Checked BEFORE rate_limited: OpenAI returns quota exhaustion as a 429
   // with "insufficient_quota" / "exceeded your current quota … billing",

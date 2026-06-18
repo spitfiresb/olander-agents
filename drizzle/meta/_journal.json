@@ -78,6 +78,20 @@
       "when": 1781111203480,
       "tag": "0010_ordinary_lady_deathstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1781762662220,
+      "tag": "0011_smiling_gideon",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1781764947754,
+      "tag": "0012_colossal_glorian",
+      "breakpoints": true
     }
   ]
 }

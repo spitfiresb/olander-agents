@@ -195,6 +195,58 @@ export const trialBudget = pgTable("trial_budget", {
   updatedBy: text("updatedBy"),
 });
 
+// Single-row ("singleton") table holding the admin-configurable max upload
+// size, in whole megabytes. Unlike trial_budget there IS an in-app control:
+// /admin/uploads writes `max_file_mb` here (clamped to the bounds in
+// src/lib/upload-settings.ts). Reads fail-open to the default if the row is
+// missing, so the feature works before the seed lands and never takes uploads
+// down on a DB hiccup. The hard ceiling lives in code
+// (MAX_UPLOAD_CEILING_BYTES in src/lib/blob.ts) — this value can't exceed it.
+export const uploadSettings = pgTable("upload_settings", {
+  id: text("id").primaryKey().default("singleton"),
+  maxFileMb: integer("max_file_mb").notNull().default(25),
+  updatedAt: timestamp("updatedAt", { mode: "date", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedBy: text("updatedBy"),
+});
+
+// Reference documents the chatbot can retrieve from (RAG). One row per uploaded
+// document; the actual chunk vectors live in Qdrant's `olander-docs` collection
+// (see src/lib/ai/qdrant-docs.ts), keyed by this row's `id` in the chunk
+// payload's `document_id`. The original file lives in Vercel Blob at `blobUrl`.
+// `status` tracks ingestion: 'processing' (uploaded, embedding in progress) →
+// 'ready' (searchable) or 'failed' (see `error`). Managed at /admin/documents.
+// Deliberately mirrors the catalog split: row metadata in Neon, vectors in
+// Qdrant, original bytes in Blob.
+export const referenceDocuments = pgTable(
+  "reference_document",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    filename: text("filename").notNull(),
+    mediaType: text("mediaType").notNull(),
+    sizeBytes: integer("sizeBytes").notNull(),
+    blobUrl: text("blobUrl").notNull(),
+    blobPathname: text("blobPathname").notNull(),
+    status: text("status")
+      .$type<"processing" | "ready" | "failed">()
+      .notNull()
+      .default("processing"),
+    chunkCount: integer("chunkCount").notNull().default(0),
+    error: text("error"),
+    uploadedBy: text("uploadedBy"),
+    createdAt: timestamp("createdAt", { mode: "date", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { mode: "date", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("reference_document_created_idx").on(t.createdAt)],
+);
+
 // Catalog row metadata — one row per inv_mast_uid mirroring p21_view_inv_mast.
 // The actual vector lives in Qdrant (see src/lib/ai/qdrant.ts) keyed on the
 // same inv_mast_uid. This table carries:
