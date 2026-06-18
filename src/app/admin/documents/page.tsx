@@ -31,11 +31,11 @@ export default async function DocumentsPage() {
           Reference documents
         </h1>
         <p className="mt-2 text-sm text-brand-ink-soft">
-          Upload company documents — policies, manuals, the employee handbook,
-          quality procedures, product catalogs — for the assistant to search and
+          Upload company documents (policies, manuals, the employee handbook,
+          quality procedures, product catalogs) for the assistant to search and
           cite in chat. Supported: PDF, Word, PowerPoint, Excel, and text/CSV.
-          Large files (catalogs) are fine. Scanned/image-only PDFs can&apos;t be
-          read yet.
+          Large files like catalogs are fine. Scanned or image-only PDFs
+          can&apos;t be read yet.
         </p>
 
         <div className="mt-6">

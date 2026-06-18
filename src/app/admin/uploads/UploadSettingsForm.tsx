@@ -3,13 +3,14 @@
 import { type FormEvent, useState, useTransition } from "react";
 import { setMaxUploadMbAction } from "./actions";
 
-type Props = {
-  current: number;
-  min: number;
-  max: number;
-};
+const SIZE_OPTIONS = [5, 10, 25, 50];
 
-export function UploadSettingsForm({ current, min, max }: Props) {
+export function UploadSettingsForm({ current }: { current: number }) {
+  // Show the current value even if it isn't one of the presets (e.g. set via
+  // the old text input), so the dropdown always reflects the real setting.
+  const options = SIZE_OPTIONS.includes(current)
+    ? SIZE_OPTIONS
+    : [...SIZE_OPTIONS, current].sort((a, b) => a - b);
   const [value, setValue] = useState(String(current));
   const [saved, setSaved] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -19,14 +20,9 @@ export function UploadSettingsForm({ current, min, max }: Props) {
     e.preventDefault();
     setError(null);
     setSaved(null);
-    const mb = Number(value);
-    if (!Number.isFinite(mb) || value.trim() === "") {
-      setError("Enter a whole number of megabytes.");
-      return;
-    }
     startTransition(async () => {
       try {
-        const result = await setMaxUploadMbAction(mb);
+        const result = await setMaxUploadMbAction(Number(value));
         setSaved(result);
         setValue(String(result));
       } catch (err) {
@@ -42,16 +38,17 @@ export function UploadSettingsForm({ current, min, max }: Props) {
     >
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-brand-ink-soft">Max upload size (MB per file)</span>
-        <input
-          type="number"
-          inputMode="numeric"
-          min={min}
-          max={max}
-          step={1}
+        <select
           value={value}
           onChange={(e) => setValue(e.target.value)}
           className="w-40 rounded-md border border-brand-charcoal/15 bg-white px-3 py-1.5 text-sm text-brand-charcoal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red"
-        />
+        >
+          {options.map((opt) => (
+            <option key={opt} value={opt}>
+              {opt} MB
+            </option>
+          ))}
+        </select>
       </label>
       <button
         type="submit"
@@ -60,13 +57,9 @@ export function UploadSettingsForm({ current, min, max }: Props) {
       >
         {pending ? "Saving…" : "Save"}
       </button>
-      <p className="w-full text-xs text-brand-ink-soft">
-        Allowed range {min}–{max} MB. Values outside the range are clamped. The
-        limit applies to each file individually and takes effect immediately.
-      </p>
       {saved !== null ? (
         <p className="w-full text-sm text-brand-charcoal">
-          Saved — the per-file upload limit is now <strong>{saved} MB</strong>.
+          Saved. The per-file upload limit is now <strong>{saved} MB</strong>.
         </p>
       ) : null}
       {error ? <p className="w-full text-sm text-brand-red">{error}</p> : null}
