@@ -36,17 +36,19 @@ describe("isReferenceDocMime", () => {
 
 describe("extractTextFromBuffer", () => {
   test("decodes plain text", async () => {
-    const text = await extractTextFromBuffer(enc("hello world\n"), "text/plain");
-    expect(text).toBe("hello world");
+    const res = await extractTextFromBuffer(enc("hello world\n"), "text/plain");
+    expect(res).toEqual({ text: "hello world", pageCount: null });
   });
 
   test("returns CSV content as text", async () => {
     const csv = "name,qty\nbolt,10";
-    expect(await extractTextFromBuffer(enc(csv), "text/csv")).toBe(csv);
+    const res = await extractTextFromBuffer(enc(csv), "text/csv");
+    expect(res).toEqual({ text: csv, pageCount: null });
   });
 
   test("is case-insensitive on the MIME type", async () => {
-    expect(await extractTextFromBuffer(enc("hi"), "TEXT/PLAIN")).toBe("hi");
+    const res = await extractTextFromBuffer(enc("hi"), "TEXT/PLAIN");
+    expect(res).toEqual({ text: "hi", pageCount: null });
   });
 
   test("throws for an unsupported MIME type", async () => {

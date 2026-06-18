@@ -19,6 +19,7 @@ export type DocumentDTO = {
   status: "processing" | "ready" | "failed";
   chunkCount: number;
   error: string | null;
+  warning: string | null;
   createdAt: string;
 };
 
@@ -61,7 +62,22 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function StatusBadge({ status }: { status: DocumentDTO["status"] }) {
+function StatusBadge({
+  status,
+  hasWarning,
+}: {
+  status: DocumentDTO["status"];
+  hasWarning?: boolean;
+}) {
+  // A 'ready' row with a warning is searchable but incomplete (e.g. a likely
+  // scan), so show it amber so it stands out from a clean Ready at a glance.
+  if (status === "ready" && hasWarning) {
+    return (
+      <span className="inline-block whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+        Ready · check
+      </span>
+    );
+  }
   const cls =
     status === "ready"
       ? "bg-green-50 text-green-700 border-green-200"
@@ -71,7 +87,9 @@ function StatusBadge({ status }: { status: DocumentDTO["status"] }) {
   const label =
     status === "ready" ? "Ready" : status === "failed" ? "Failed" : "Processing…";
   return (
-    <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${cls}`}>
+    <span
+      className={`inline-block whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium ${cls}`}
+    >
       {label}
     </span>
   );
@@ -180,7 +198,7 @@ export function DocumentManager({
           setError(`${file.name}: unsupported file type`);
           continue;
         }
-        // Reject oversized files before the upload even starts — no point sending
+        // Reject oversized files before the upload even starts; no point sending
         // bytes the server will refuse. The token route re-checks server-side.
         if (file.size > MAX_DOC_BYTES) {
           setError(`${file.name}: too large to upload (max ${MAX_DOC_MB} MB).`);
@@ -188,7 +206,7 @@ export function DocumentManager({
         }
         // Direct browser→Blob upload, authorized by the token route. Bypasses
         // the serverless body-size limit. A single PUT (no multipart) is the
-        // reliable path at our file sizes — multipart's multi-step handshake
+        // reliable path at our file sizes; multipart's multi-step handshake
         // was stalling the upload before it could complete.
         const blob = await upload(`${REFERENCE_DOC_PREFIX}/${file.name}`, file, {
           access: "public",
@@ -263,7 +281,7 @@ export function DocumentManager({
   }
 
   // Dismiss on backdrop click (the click lands on the <dialog> itself, not its
-  // content) — but never mid-removal.
+  // content), but never mid-removal.
   function onDialogClick(e: ReactMouseEvent<HTMLDialogElement>) {
     if (removing) return;
     if (e.target === dialogRef.current) setPendingRemoval(null);
@@ -281,8 +299,9 @@ export function DocumentManager({
           {busy ? "Uploading…" : "Upload document"}
         </button>
         <span className="text-xs text-brand-ink-soft">
-          Up to {MAX_DOC_MB} MB per file. Indexing runs in the background — large
-          files take a minute. Don&apos;t reload while an upload is in progress.
+          Up to {MAX_DOC_MB} MB per file. Indexing runs in the background, so
+          large files take a minute. Don&apos;t reload while an upload is in
+          progress.
         </span>
       </div>
       <input
@@ -314,12 +333,15 @@ export function DocumentManager({
                   {d.status === "failed" && d.error ? (
                     <div className="mt-0.5 text-[11px] text-brand-red">{d.error}</div>
                   ) : null}
+                  {d.status === "ready" && d.warning ? (
+                    <div className="mt-0.5 text-[11px] text-amber-700">{d.warning}</div>
+                  ) : null}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-brand-ink-soft">
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-brand-ink-soft">
                   {formatBytes(d.sizeBytes)}
                 </td>
                 <td className="px-3 py-2">
-                  <StatusBadge status={d.status} />
+                  <StatusBadge status={d.status} hasWarning={!!d.warning} />
                 </td>
                 <td className="px-3 py-2 text-right">
                   <div className="flex items-center justify-end gap-3">
