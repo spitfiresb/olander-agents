@@ -1,7 +1,14 @@
 "use client";
 
 import { upload } from "@vercel/blob/client";
-import { type ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type MouseEvent as ReactMouseEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 export type DocumentDTO = {
   id: string;
@@ -78,6 +85,18 @@ export function DocumentManager({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Remove-confirmation modal state. `pendingRemoval` drives the dialog;
+  // `displayedRemoval` lags on close so the content stays mounted through the
+  // fade-out animation (same pattern as the members table).
+  const [pendingRemoval, setPendingRemovalRaw] = useState<
+    { id: string; filename: string } | null
+  >(null);
+  const [displayedRemoval, setDisplayedRemoval] = useState<
+    { id: string; filename: string } | null
+  >(null);
+  const [removing, setRemoving] = useState(false);
+  const clearTimerRef = useRef<number | null>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -111,6 +130,41 @@ export function DocumentManager({
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [busy]);
+
+  // Single update path so pendingRemoval and displayedRemoval stay in sync:
+  // immediate on open, delayed on close (matching the dialog fade-out).
+  function setPendingRemoval(value: { id: string; filename: string } | null) {
+    if (clearTimerRef.current !== null) {
+      window.clearTimeout(clearTimerRef.current);
+      clearTimerRef.current = null;
+    }
+    if (value) {
+      setDisplayedRemoval(value);
+    } else {
+      clearTimerRef.current = window.setTimeout(() => {
+        setDisplayedRemoval(null);
+        clearTimerRef.current = null;
+      }, 220);
+    }
+    setPendingRemovalRaw(value);
+  }
+
+  // Drive the native <dialog> from state. showModal() handles top-layer
+  // rendering, focus trap, and Esc-to-close; the .confirm-dialog class in
+  // globals.css handles centering + entry/exit animation.
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (pendingRemoval && !dialog.open) dialog.showModal();
+    else if (!pendingRemoval && dialog.open) dialog.close();
+  }, [pendingRemoval]);
+
+  useEffect(
+    () => () => {
+      if (clearTimerRef.current !== null) window.clearTimeout(clearTimerRef.current);
+    },
+    [],
+  );
 
   async function onPickFiles(e: ChangeEvent<HTMLInputElement>) {
     const files = e.target.files ? Array.from(e.target.files) : [];
@@ -159,8 +213,16 @@ export function DocumentManager({
     }
   }
 
-  async function onDelete(id: string, filename: string) {
-    if (!window.confirm(`Remove "${filename}" from the reference library?`)) return;
+  function requestRemoval(id: string, filename: string) {
+    if (removing) return;
+    setError(null);
+    setPendingRemoval({ id, filename });
+  }
+
+  async function confirmRemoval() {
+    if (!pendingRemoval) return;
+    const { id } = pendingRemoval;
+    setRemoving(true);
     try {
       await fetch(`/api/admin/documents?id=${encodeURIComponent(id)}`, {
         method: "DELETE",
@@ -168,7 +230,17 @@ export function DocumentManager({
       await refresh();
     } catch {
       setError("Couldn't delete. Try again.");
+    } finally {
+      setRemoving(false);
+      setPendingRemoval(null);
     }
+  }
+
+  // Dismiss on backdrop click (the click lands on the <dialog> itself, not its
+  // content) — but never mid-removal.
+  function onDialogClick(e: ReactMouseEvent<HTMLDialogElement>) {
+    if (removing) return;
+    if (e.target === dialogRef.current) setPendingRemoval(null);
   }
 
   return (
@@ -226,7 +298,7 @@ export function DocumentManager({
                 <td className="px-3 py-2 text-right">
                   <button
                     type="button"
-                    onClick={() => void onDelete(d.id, d.filename)}
+                    onClick={() => requestRemoval(d.id, d.filename)}
                     className="rounded text-xs font-medium text-brand-red hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red"
                   >
                     Remove
@@ -244,6 +316,54 @@ export function DocumentManager({
           </tbody>
         </table>
       </div>
+
+      {/* Confirm-removal modal. Always in the DOM; visibility driven by
+          showModal()/close() in the effect above. The .confirm-dialog class
+          (globals.css) handles centering + the open/close animation. */}
+      <dialog
+        ref={dialogRef}
+        onClose={() => setPendingRemoval(null)}
+        onClick={onDialogClick}
+        aria-labelledby="remove-doc-title"
+        className="confirm-dialog w-[calc(100%-3rem)] max-w-md rounded-2xl border border-brand-charcoal/10 bg-white p-6 shadow-2xl"
+      >
+        {displayedRemoval ? (
+          <div>
+            <h2
+              id="remove-doc-title"
+              className="text-base font-semibold text-brand-charcoal"
+            >
+              Remove this document?
+            </h2>
+            <p className="mt-2 text-sm text-brand-ink-soft">
+              <span className="font-medium text-brand-charcoal">
+                {displayedRemoval.filename}
+              </span>{" "}
+              will be removed from the reference library, and the assistant
+              won&apos;t be able to cite it anymore. This can&apos;t be undone.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingRemoval(null)}
+                disabled={removing}
+                className="rounded-md border border-brand-charcoal/15 bg-white px-3 py-1.5 text-sm font-medium text-brand-charcoal transition-colors hover:bg-brand-charcoal/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-charcoal/30 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmRemoval()}
+                disabled={removing}
+                autoFocus
+                className="rounded-md bg-brand-red px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-brand-red/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {removing ? "Removing…" : "Remove"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </dialog>
     </div>
   );
 }
