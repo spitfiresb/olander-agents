@@ -18,8 +18,9 @@ export type DocumentDTO = {
   sizeBytes: number;
   status: "processing" | "ready" | "failed";
   chunkCount: number;
+  // Note for the row's current state: failure reason when 'failed', optional
+  // scan caveat when 'ready'. Colored by status in the UI. Null when clean.
   error: string | null;
-  warning: string | null;
   createdAt: string;
 };
 
@@ -333,15 +334,15 @@ export function DocumentManager({
                   {d.status === "failed" && d.error ? (
                     <div className="mt-0.5 text-[11px] text-brand-red">{d.error}</div>
                   ) : null}
-                  {d.status === "ready" && d.warning ? (
-                    <div className="mt-0.5 text-[11px] text-amber-700">{d.warning}</div>
+                  {d.status === "ready" && d.error ? (
+                    <div className="mt-0.5 text-[11px] text-amber-700">{d.error}</div>
                   ) : null}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-brand-ink-soft">
                   {formatBytes(d.sizeBytes)}
                 </td>
                 <td className="px-3 py-2">
-                  <StatusBadge status={d.status} hasWarning={!!d.warning} />
+                  <StatusBadge status={d.status} hasWarning={d.status === "ready" && !!d.error} />
                 </td>
                 <td className="px-3 py-2 text-right">
                   <div className="flex items-center justify-end gap-3">

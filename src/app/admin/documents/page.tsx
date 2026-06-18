@@ -20,7 +20,6 @@ export default async function DocumentsPage() {
     status: d.status,
     chunkCount: d.chunkCount,
     error: d.error,
-    warning: d.warning,
     createdAt: d.createdAt.toISOString(),
   }));
 

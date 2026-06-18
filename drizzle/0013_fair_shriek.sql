@@ -1,1 +1,0 @@
-ALTER TABLE "reference_document" ADD COLUMN "warning" text;

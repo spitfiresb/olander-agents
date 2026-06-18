@@ -148,7 +148,6 @@ async function markFailed(id: string, error: string): Promise<void> {
     .set({
       status: "failed",
       error: error.slice(0, 1000),
-      warning: null,
       updatedAt: new Date(),
     })
     .where(eq(referenceDocuments.id, id));
@@ -156,8 +155,9 @@ async function markFailed(id: string, error: string): Promise<void> {
 
 // Flag a PDF that almost certainly has no real text layer: enough pages to
 // judge, but averaging fewer than SCAN_MIN_WORDS_PER_PAGE words/page. Returns a
-// note quoting the real words-per-page figure (shown on the 'ready' row) or
-// null. Non-PDF formats have no page count, so they never trip this.
+// note quoting the real words-per-page figure (carried in the row's `error`
+// field and shown amber on the 'ready' row) or null. Non-PDF formats have no
+// page count, so they never trip this.
 function scanWarning(
   words: number,
   pageCount: number | null,
@@ -234,16 +234,17 @@ export async function processReferenceDocument(id: string): Promise<void> {
 
     // Indexed successfully, but flag a likely-scanned PDF so the admin knows the
     // search index only holds the sliver of text we could read. Non-blocking:
-    // the row is still 'ready' and the extracted text is searchable.
-    const warning = scanWarning(words, pageCount);
+    // the row stays 'ready' and the extracted text is searchable. The note rides
+    // in `error` (null when there's nothing to flag); the UI colors it amber on
+    // a 'ready' row and red on a 'failed' one, so one field serves both.
+    const note = scanWarning(words, pageCount);
 
     await db
       .update(referenceDocuments)
       .set({
         status: "ready",
         chunkCount: written,
-        error: null,
-        warning,
+        error: note,
         updatedAt: new Date(),
       })
       .where(eq(referenceDocuments.id, id));
@@ -269,7 +270,7 @@ export async function requeueReferenceDocument(
 ): Promise<ReferenceDocument | null> {
   const [row] = await db
     .update(referenceDocuments)
-    .set({ status: "processing", error: null, warning: null, updatedAt: new Date() })
+    .set({ status: "processing", error: null, updatedAt: new Date() })
     .where(eq(referenceDocuments.id, id))
     .returning();
   return row ?? null;
