@@ -2,16 +2,17 @@
 
 import { type FormEvent, useState, useTransition } from "react";
 import { setMaxUploadMbAction } from "./actions";
+import { SizeDropdown } from "./SizeDropdown";
 
 const SIZE_OPTIONS = [5, 10, 25, 50];
 
 export function UploadSettingsForm({ current }: { current: number }) {
-  // Show the current value even if it isn't one of the presets (e.g. set via
-  // the old text input), so the dropdown always reflects the real setting.
+  // Show the current value even if it isn't one of the presets, so the dropdown
+  // always reflects the real setting.
   const options = SIZE_OPTIONS.includes(current)
     ? SIZE_OPTIONS
     : [...SIZE_OPTIONS, current].sort((a, b) => a - b);
-  const [value, setValue] = useState(String(current));
+  const [value, setValue] = useState(current);
   const [saved, setSaved] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -22,9 +23,9 @@ export function UploadSettingsForm({ current }: { current: number }) {
     setSaved(null);
     startTransition(async () => {
       try {
-        const result = await setMaxUploadMbAction(Number(value));
+        const result = await setMaxUploadMbAction(value);
         setSaved(result);
-        setValue(String(result));
+        setValue(result);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Couldn't save.");
       }
@@ -38,17 +39,12 @@ export function UploadSettingsForm({ current }: { current: number }) {
     >
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-brand-ink-soft">Max upload size (MB per file)</span>
-        <select
+        <SizeDropdown
           value={value}
-          onChange={(e) => setValue(e.target.value)}
-          className="w-40 rounded-md border border-brand-charcoal/15 bg-white px-3 py-1.5 text-sm text-brand-charcoal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red"
-        >
-          {options.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt} MB
-            </option>
-          ))}
-        </select>
+          options={options}
+          onChange={setValue}
+          disabled={pending}
+        />
       </label>
       <button
         type="submit"
