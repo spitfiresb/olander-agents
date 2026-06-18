@@ -98,6 +98,20 @@ export function DocumentManager({
     return () => clearTimeout(t);
   }, [documents, refresh]);
 
+  // Guard against losing an in-flight upload to an accidental reload/close. A
+  // browser upload can't continue across a navigation (the transfer is tied to
+  // this page), so the best we can do is warn before the page unloads while an
+  // upload is running.
+  useEffect(() => {
+    if (!busy) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [busy]);
+
   async function onPickFiles(e: ChangeEvent<HTMLInputElement>) {
     const files = e.target.files ? Array.from(e.target.files) : [];
     e.target.value = ""; // allow re-picking the same file
@@ -153,7 +167,7 @@ export function DocumentManager({
       });
       await refresh();
     } catch {
-      setError("Couldn't delete — try again.");
+      setError("Couldn't delete. Try again.");
     }
   }
 
@@ -169,7 +183,8 @@ export function DocumentManager({
           {busy ? "Uploading…" : "Upload document"}
         </button>
         <span className="text-xs text-brand-ink-soft">
-          Indexing runs in the background — large files take a minute.
+          Indexing runs in the background. Large files take a minute. Don&apos;t
+          reload while an upload is in progress.
         </span>
       </div>
       <input
@@ -189,7 +204,6 @@ export function DocumentManager({
             <tr>
               <th className="px-3 py-2 font-semibold">Document</th>
               <th className="px-3 py-2 text-right font-semibold">Size</th>
-              <th className="px-3 py-2 text-right font-semibold">Chunks</th>
               <th className="px-3 py-2 font-semibold">Status</th>
               <th className="px-3 py-2" />
             </tr>
@@ -205,9 +219,6 @@ export function DocumentManager({
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-brand-ink-soft">
                   {formatBytes(d.sizeBytes)}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-brand-ink-soft">
-                  {d.chunkCount || "—"}
                 </td>
                 <td className="px-3 py-2">
                   <StatusBadge status={d.status} />
@@ -225,7 +236,7 @@ export function DocumentManager({
             ))}
             {documents.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-sm text-brand-ink-soft">
+                <td colSpan={4} className="px-3 py-6 text-center text-sm text-brand-ink-soft">
                   No documents yet. Upload one to make it searchable in chat.
                 </td>
               </tr>

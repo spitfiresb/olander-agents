@@ -1,11 +1,7 @@
 import { redirect, notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { BackLink } from "@/components/BackLink";
-import {
-  getMaxUploadMb,
-  MAX_MAX_UPLOAD_MB,
-  MIN_MAX_UPLOAD_MB,
-} from "@/lib/upload-settings";
+import { getMaxUploadMb } from "@/lib/upload-settings";
 import { UploadSettingsForm } from "./UploadSettingsForm";
 
 export const dynamic = "force-dynamic";
@@ -31,11 +27,7 @@ export default async function UploadSettingsPage() {
         </p>
 
         <div className="mt-6">
-          <UploadSettingsForm
-            current={current}
-            min={MIN_MAX_UPLOAD_MB}
-            max={MAX_MAX_UPLOAD_MB}
-          />
+          <UploadSettingsForm current={current} />
         </div>
       </div>
     </div>
