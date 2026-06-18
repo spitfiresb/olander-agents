@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { MAX_DOC_BYTES, MAX_DOC_MB } from "@/lib/document-limits";
 
 export type DocumentDTO = {
   id: string;
@@ -179,6 +180,12 @@ export function DocumentManager({
           setError(`${file.name}: unsupported file type`);
           continue;
         }
+        // Reject oversized files before the upload even starts — no point sending
+        // bytes the server will refuse. The token route re-checks server-side.
+        if (file.size > MAX_DOC_BYTES) {
+          setError(`${file.name}: too large to upload (max ${MAX_DOC_MB} MB).`);
+          continue;
+        }
         // Direct browser→Blob upload, authorized by the token route. Bypasses
         // the serverless body-size limit. A single PUT (no multipart) is the
         // reliable path at our file sizes — multipart's multi-step handshake
@@ -210,6 +217,25 @@ export function DocumentManager({
       setError(err instanceof Error ? err.message : "Upload failed.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function retry(id: string) {
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/documents", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(body.error ?? "Couldn't retry indexing.");
+        return;
+      }
+      await refresh(); // status flips to processing; the poll picks it up from here
+    } catch {
+      setError("Couldn't retry indexing. Try again.");
     }
   }
 
@@ -255,8 +281,8 @@ export function DocumentManager({
           {busy ? "Uploading…" : "Upload document"}
         </button>
         <span className="text-xs text-brand-ink-soft">
-          Indexing runs in the background. Large files take a minute. Don&apos;t
-          reload while an upload is in progress.
+          Up to {MAX_DOC_MB} MB per file. Indexing runs in the background — large
+          files take a minute. Don&apos;t reload while an upload is in progress.
         </span>
       </div>
       <input
@@ -296,13 +322,24 @@ export function DocumentManager({
                   <StatusBadge status={d.status} />
                 </td>
                 <td className="px-3 py-2 text-right">
-                  <button
-                    type="button"
-                    onClick={() => requestRemoval(d.id, d.filename)}
-                    className="rounded text-xs font-medium text-brand-red hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red"
-                  >
-                    Remove
-                  </button>
+                  <div className="flex items-center justify-end gap-3">
+                    {d.status === "failed" ? (
+                      <button
+                        type="button"
+                        onClick={() => void retry(d.id)}
+                        className="rounded text-xs font-medium text-brand-charcoal hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-charcoal/30"
+                      >
+                        Retry
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => requestRemoval(d.id, d.filename)}
+                      className="rounded text-xs font-medium text-brand-red hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

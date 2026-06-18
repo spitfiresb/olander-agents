@@ -1,6 +1,7 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { auth } from "@/auth";
 import { isSameOrigin } from "@/lib/csrf";
+import { MAX_DOC_BYTES } from "@/lib/document-limits";
 import { REFERENCE_DOC_MIMES } from "@/lib/extract";
 
 export const dynamic = "force-dynamic";
@@ -10,11 +11,8 @@ export const dynamic = "force-dynamic";
 // request-body limit (~4.5 MB) that would block large files like a product
 // catalog. Admin-gated at token-generation time: a non-admin can't get a token,
 // so they can't upload. The row + ingestion are created by a second call to
-// POST /api/admin/documents once the blob upload finishes.
-
-// Generous ceiling — client uploads go direct to Blob, so this isn't bound by
-// the function body limit. Reference manuals/catalogs can be tens of MB.
-const MAX_DOC_BYTES = 100 * 1024 * 1024; // 100 MB
+// POST /api/admin/documents once the blob upload finishes. The size ceiling
+// (MAX_DOC_BYTES) is enforced here too, so a forged direct call can't exceed it.
 
 export async function POST(request: Request): Promise<Response> {
   if (!isSameOrigin(request.headers)) {
