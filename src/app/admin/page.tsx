@@ -100,6 +100,18 @@ export default async function AdminPage() {
               Set the maximum file size reps can attach in chat.
             </div>
           </Link>
+
+          <Link
+            href="/admin/documents"
+            className="block rounded-2xl border border-brand-charcoal/10 bg-white p-5 transition-colors hover:border-brand-charcoal/30 hover:bg-brand-sand/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red"
+          >
+            <div className="text-base font-medium text-brand-charcoal">
+              Reference documents
+            </div>
+            <div className="mt-1 text-sm text-brand-ink-soft">
+              Upload manuals, policies, and catalogs the assistant can cite.
+            </div>
+          </Link>
         </div>
       </div>
     </div>

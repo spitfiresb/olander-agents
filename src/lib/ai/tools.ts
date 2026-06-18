@@ -3,6 +3,8 @@ import { z } from "zod";
 import { embedQuery } from "@/lib/ai/embeddings";
 import { getViewSchema } from "@/lib/ai/p21-schema";
 import { qdrantConfigured, searchCatalogByVector } from "@/lib/ai/qdrant";
+import { docsConfigured } from "@/lib/ai/qdrant-docs";
+import { searchReferenceDocuments, type DocumentPassage } from "@/lib/documents";
 import {
   isEntityAllowed,
   isViewAllowed,
@@ -654,6 +656,58 @@ function makeAggregate(scopes: EffectiveScopes, catalog: ScopeCatalog) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// searchDocuments — semantic search over admin-uploaded reference documents
+//
+// Backed by the Qdrant `olander-docs` collection (1024d cosine), one point per
+// text chunk (src/lib/documents.ts). Unlike the P21 tools this is NOT scope-
+// gated: the documents are company reference material an admin deliberately
+// published, so any signed-in rep may search them. (Per-document scoping is a
+// possible future refinement — see the docs-store plan.)
+
+type DocSearchError =
+  | { error: "search_not_configured" }
+  | { error: "search_failed"; detail: string };
+
+function makeSearchDocuments() {
+  return tool({
+    description:
+      "Semantic search over Olander's internal reference documents — policies, " +
+      "manuals, employee handbook, quality/ISO procedures, product catalogs, and " +
+      "guides that an admin has uploaded. Use this when the rep asks about company " +
+      "policy, procedures, specifications, or anything that lives in a document " +
+      "rather than the P21 ERP (e.g. \"what's our return policy\", \"torque spec " +
+      "for a Helicoil M10 insert\", \"PTO accrual rules\"). Returns { passages: " +
+      "[{ source, text, score }] } — cite the source filename in your answer. For " +
+      "live parts/stock/order data use viewsQuery, searchCatalog, or aggregate instead.",
+    inputSchema: z.object({
+      query: z
+        .string()
+        .min(2)
+        .max(512)
+        .describe("Natural-language question. The rep's own phrasing is fine."),
+      topK: z.number().int().min(1).max(10).default(5),
+    }),
+    execute: async ({
+      query,
+      topK,
+    }): Promise<{ passages: DocumentPassage[] } | DocSearchError> => {
+      if (!process.env.VOYAGE_API_KEY || !docsConfigured()) {
+        return { error: "search_not_configured" };
+      }
+      try {
+        const passages = await searchReferenceDocuments(query, topK);
+        return { passages };
+      } catch (e) {
+        return {
+          error: "search_failed",
+          detail: e instanceof Error ? e.message : String(e),
+        };
+      }
+    },
+  });
+}
+
 // Build the tool set for a single chat request. Pass the caller's effective
 // scopes ("all" for admins) along with the ScopeCatalog snapshot loaded at
 // request entry — every tool's execute path runs the scope check before any
@@ -665,5 +719,6 @@ export function buildTools(scopes: EffectiveScopes, catalog: ScopeCatalog) {
     entityGet: makeEntityGet(scopes, catalog),
     searchCatalog: makeSearchCatalog(scopes, catalog),
     aggregate: makeAggregate(scopes, catalog),
+    searchDocuments: makeSearchDocuments(),
   } as const;
 }
