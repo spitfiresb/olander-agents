@@ -40,6 +40,30 @@ Read `VISION.md` before making product decisions, adding features, or changing U
 
 Refer to `DESIGN.md` before making design decisions.
 
+## Workforce-capture contract (pak)
+
+Olander machines run **pak**, a workforce-capture daemon, which captures
+AI prompts/responses from this app by reading its accessibility tree (config
+lives in a separate internal repo, keyed to `<agent-domain>`). The following
+surface details are a **compatibility contract** — changing any of them silently
+breaks prompt capture fleet-wide with no error anywhere, so treat them like a
+public API:
+
+- The composer stays a plain `<textarea>` (`Composer.tsx`). Do not migrate to a
+  contenteditable/custom editor without coordinating a pak config update.
+- The stop button's `aria-label="Stop generating"`.
+- The composer placeholder: "Ask about a customer, item, or order…".
+- Assistant replies render inside the `prose-chat` container
+  (`AssistantContent.tsx`).
+- The URL rewrite to `/chat/<id>` for a new conversation is deferred until the
+  turn settles (`ChatShell.tsx`, `pendingUrlConversationIdRef`) — a mid-submit
+  URL change resets pak's pending capture and drops the first prompt of every
+  new chat.
+
+If one of these must change, update pak's site config in the same window
+(`pak/helpers/prompt_tap.swift` + `pak/src/winprompt.rs`, site id
+`<agent-domain>`) and note it in `pak/docs/AI_CAPTURE.md`.
+
 ## Regression prevention
 
 Before declaring any change done, consult `TESTING.md` — a checklist of smoke tests and past regressions, sorted by historical fragility (auth → chat → status → P21 → db → ui). If your change touches a listed surface, run that section's checks. When a new class of regression bites us, add it to the file and promote the section.

@@ -79,6 +79,10 @@ export function ChatShell({
   // React state because the transport callback fires outside the render
   // path, same reason as conversationIdRef.
   const editedMessageIdRef = useRef<string | null>(null);
+  // A newly created conversation's id, waiting for the in-flight turn to
+  // settle before the URL is rewritten to /chat/<id>. See the status effect
+  // below for why the rewrite is deferred (workforce-capture compatibility).
+  const pendingUrlConversationIdRef = useRef<string | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(
     initialConversationId ?? null,
   );
@@ -179,6 +183,24 @@ export function ChatShell({
     lastStatusRef.current = status;
   }, [status]);
 
+  // Apply the deferred URL rewrite for a newly created conversation once the
+  // turn settles. `submitMessage` stashes the id instead of calling
+  // replaceState immediately: history API instead of router.replace because a
+  // Next navigation would remount ChatShell mid-stream (dropping the in-flight
+  // useChat state), and deferred until settle because pak — the workforce-
+  // capture daemon on Olander machines — keys AI-prompt capture on the tab
+  // URL, and a mid-submit URL change made it drop the first prompt of every
+  // new chat. The guard skips the rewrite if the user started a new chat or
+  // switched conversations while the turn was still streaming.
+  useEffect(() => {
+    if (status !== "ready" && status !== "error") return;
+    const pending = pendingUrlConversationIdRef.current;
+    if (pending && conversationIdRef.current === pending) {
+      window.history.replaceState(null, "", `/chat/${pending}`);
+    }
+    pendingUrlConversationIdRef.current = null;
+  }, [status]);
+
   function startNewChat() {
     setMessages([]);
     clearError();
@@ -187,6 +209,7 @@ export function ChatShell({
     setAttachmentBanner(null);
     conversationIdRef.current = null;
     setConversationId(null);
+    pendingUrlConversationIdRef.current = null;
     router.push("/chat");
   }
 
@@ -329,14 +352,13 @@ export function ChatShell({
           };
           conversationIdRef.current = data.conversation.id;
           setConversationId(data.conversation.id);
-          // History API instead of router.replace: we want the URL to track
-          // the new conversation id, but `router.replace` triggers a Next
-          // navigation that remounts ChatShell — which would drop the
-          // in-flight `useChat` state and show the empty placeholder while
-          // the assistant streams onto the unmounted component. Updating
-          // history directly keeps the running component alive; the next
-          // hard navigation (refresh, deep link) hits /chat/[id] cleanly.
-          window.history.replaceState(null, "", `/chat/${data.conversation.id}`);
+          // The URL rewrite to /chat/<id> is DEFERRED until the turn settles
+          // (see the pendingUrlConversationIdRef effect). Rewriting here —
+          // mid-submit — changed the tab URL while Olander's workforce-capture
+          // daemon (pak) had a prompt capture pending; pak keys its capture
+          // target on the URL, so the change reset it and silently dropped the
+          // first prompt of every new chat from the AI-usage data.
+          pendingUrlConversationIdRef.current = data.conversation.id;
         }
       } catch {
         // Falls through — server will create if we didn't send an id
