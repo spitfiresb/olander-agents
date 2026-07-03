@@ -176,19 +176,48 @@ function annotateViewError(result: unknown): unknown {
   return { ...(result as Record<string, unknown>), hint };
 }
 
+// A substringof() text filter on item_desc that comes back with ZERO rows is
+// the classic false-negative: P21's descriptions are abbreviated and
+// inconsistent ('LOCKNUT' not 'LOCK NUT', 'SST'/'316SST' not 'STAINLESS'), so a
+// literal text match routinely misses parts we actually stock. This fires on the
+// SYMPTOM (a descriptive filter that whiffed) regardless of the specific part,
+// so it catches the whole class the system prompt's steering can miss — it steers
+// the model to searchCatalog (semantic, spelling-immune) instead of letting an
+// empty page become a confident "we don't carry it". See TESTING.md § P21
+// (descriptive-query routing) and the "Finding parts by description" prompt block.
+const DESC_TEXT_FILTER_RE = /substringof\s*\([^)]*\bitem_desc\b/i;
+
+export function descriptiveNoMatchHint(
+  filter: string | undefined,
+  rowCount: number,
+): string | null {
+  if (rowCount !== 0 || !filter || !DESC_TEXT_FILTER_RE.test(filter)) return null;
+  return (
+    "0 rows from a substringof() text filter on item_desc. P21 descriptions are " +
+    "abbreviated and inconsistent ('LOCKNUT' not 'LOCK NUT', 'SST'/'316SST' not " +
+    "'STAINLESS'), so a literal text match routinely misses parts we actually " +
+    "stock. Do NOT conclude 'no results' from this empty page — retry the lookup " +
+    "with searchCatalog (semantic search over the catalog, immune to these " +
+    "abbreviation differences), then read p21_view_inv_loc on the item_ids it " +
+    "returns for on-hand."
+  );
+}
+
 // Post-process a successful viewsQuery page from the proxy before it reaches
 // the model:
 //   - coerce numeric columns the proxy's name-regex missed (by schema type),
 //     so fields like gross_margin/profit_percent sort and compare numerically;
 //   - redact cost/margin columns for callers without the pricing scope;
 //   - flag truncation so a full page is never presented as a complete list or
-//     an exact count.
+//     an exact count;
+//   - on an empty page from a text filter on item_desc, steer to searchCatalog.
 // Errors fall through to annotateViewError unchanged.
 function finalizeViewResult(
   viewName: string,
   result: unknown,
   requestedTop: number,
   scopes: EffectiveScopes,
+  filter?: string,
 ): unknown {
   if (!result || typeof result !== "object" || "error" in result) {
     return annotateViewError(result);
@@ -231,6 +260,10 @@ function finalizeViewResult(
       `Cost/margin columns (${redactedColumns.join(", ")}) were withheld — you lack the "Job ` +
       `pricing" data scope. Do NOT say the system has no such data; tell the user it requires ` +
       `pricing access that an admin can grant.`;
+  }
+  if (rows.length === 0) {
+    const noMatchHint = descriptiveNoMatchHint(filter, 0);
+    if (noMatchHint) out.note_no_match = noMatchHint;
   }
   return out;
 }
@@ -291,7 +324,7 @@ function makeViewsQuery(scopes: EffectiveScopes, catalog: ScopeCatalog) {
       select: input.select,
       orderBy: input.orderBy,
     });
-    return finalizeViewResult(input.viewName, result, requestedTop, scopes);
+    return finalizeViewResult(input.viewName, result, requestedTop, scopes, input.filter);
   },
   });
 }

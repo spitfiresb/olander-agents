@@ -42,6 +42,22 @@ const ACCURACY_PROBES = [
   "When did 4007JS16-16SS last sell, and do we have any on hand right now?",
 ];
 
+// Descriptive-part-routing probes. Liveness (non-blank, didn't loop) is NOT
+// enough for these: the lock-nut regression returned a confident, non-blank,
+// grounded-looking WRONG answer ("I couldn't find any…") off a single 0-row
+// substringof(item_desc) filter — it passed every liveness check. For a part
+// described in the rep's own words, the model MUST route through searchCatalog
+// (semantic, spelling-immune), not a literal text filter on the abbreviated
+// item_desc. These are a subset of SUGGESTION_POOL, asserted harder here. Exact
+// SKUs ("31C100SHCS") and spec questions ("helicoil size") are deliberately NOT
+// listed — they legitimately skip searchCatalog. See src/lib/ai/tools.ts
+// (descriptiveNoMatchHint) and TESTING.md § P21 (descriptive-query routing).
+const MUST_USE_SEARCH_CATALOG = new Set<string>([
+  "Do we have any M10 1.25 socket head cap screws in stock?",
+  "Find a 5/16-18 stainless flange nut",
+  "Stock check on 1/4-20 stainless lock nuts",
+]);
+
 const TODAY = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/Los_Angeles",
   year: "numeric",
@@ -89,10 +105,16 @@ async function main() {
           stepNumber >= STEP_CAP - 1 ? { toolChoice: "none" } : {},
       });
 
-      // Count tool results by success/error directly (no regex double-counting).
+      // Count tool results by success/error directly (no regex double-counting),
+      // and collect the tool names called for the routing assertion below.
       let ok = 0;
       let errs = 0;
+      const toolNames = new Set<string>();
       for (const step of res.steps) {
+        for (const tc of step.toolCalls ?? []) {
+          const name = (tc as { toolName?: string }).toolName;
+          if (name) toolNames.add(name);
+        }
         for (const tr of step.toolResults ?? []) {
           const out = (tr as { output?: unknown; result?: unknown }).output ??
             (tr as { result?: unknown }).result;
@@ -107,6 +129,16 @@ async function main() {
       if (steps >= STEP_CAP) reasons.push(`hit step cap (${steps} = likely loop)`);
       // Tried tools but every call failed → answer can't be grounded.
       if (errs > 0 && ok === 0) reasons.push(`all ${errs} tool calls errored`);
+      // Descriptive-part routing: must reach for searchCatalog, not a literal
+      // item_desc text filter. This is the assertion the lock-nut regression
+      // needs — liveness alone let the wrong-avenue answer through.
+      if (MUST_USE_SEARCH_CATALOG.has(q) && !toolNames.has("searchCatalog")) {
+        reasons.push(
+          `descriptive part query did not route to searchCatalog (used: ${
+            [...toolNames].join(", ") || "no tools"
+          })`,
+        );
+      }
       return {
         q,
         pass: reasons.length === 0,
