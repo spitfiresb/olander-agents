@@ -18,7 +18,7 @@ none of those are mine to publish.
 | `docs/P21_Schema.md` | 5,800-line human-readable schema dump taken from their instance. The machine-readable subset the app needs is kept (see below). |
 | `docs/OLANDER_REQUESTS.md` | The client's internal feature requests and complaints. |
 | `docs/Assignments.md` | Internal task assignments naming outside contacts. |
-| `brand/` | The client's logo and a screenshot of their marketing site. Their trademarks. |
+| `brand/` and `design references/` | The client's logo and screenshots of their marketing site, at both paths the assets ever lived at. Their trademarks. |
 | `src/lib/ai/system-prompt.ts` | ~880 lines encoding their pricing and margin policy, per-view column hints tuned against live data, and a domain reference section. Replaced with a generic stand-in — see below. |
 
 ## Redacted in place
@@ -42,6 +42,18 @@ module's interface (`SYSTEM_PROMPT`), the six-tool contract, the accuracy
 guardrails, and the answer discipline, so the chat route still builds and runs
 and the approach is legible. It is deliberately generic and is **not** the
 prompt that shipped.
+
+**`src/components/Logo.tsx`** and **`src/app/icon.svg`** — the shipped
+component drew the client's registered wordmark as traced SVG paths, and the
+favicon was their icon mark. Both are trademarks. The stand-ins keep the same
+props, viewBox, and brand-red field, setting the name in a generic sans-serif
+instead of the protected letterforms, so `Wordmark`, `TopRightLogo`,
+`EmptyState`, and `/status` all lay out unchanged.
+
+**Example SKU** — the canonical part number used throughout the tests and docs
+was a real item from the client's catalog. It is replaced with a synthetic SKU
+of the same shape (`PN12345-01`), consistently, so the fixtures still exercise
+the alphanumeric-with-hyphen parsing they were written for.
 
 ## Deliberately kept
 
