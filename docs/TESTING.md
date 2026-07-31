@@ -164,7 +164,7 @@ The agent must FAIL LOUD, not quiet: when it can't compute exactly, it says so. 
   - **Find-the-zeros / full-fold timeout** — `aggregate` now takes `order:'asc'` + `having:{op,value}` (returns `groups_matching`) for bottom/zero questions; **a full `inv_loc` fold times out at ~23%**, so the model must filter first (e.g. `qty_on_hand gt 0` → exact in ~12s). The dead-stock recipes live in the system prompt's "DEAD / SLOW-MOVING STOCK" guardrail. **`order`/`having` require a droplet deploy of `proxy-server.mjs`** — until deployed they're ignored upstream (groups still rank desc, no having filter), so verify against the live proxy after restart.
 
 ### When you change P21-touching code
-- [ ] Re-read `P21_API.md` (auth flow, OData operators, real response shapes) before writing new request code — the API has gotchas that aren't obvious from the response format.
+- [ ] Re-read `P21_API.md` (auth flow, OData operators, real response shapes; withheld from the public copy) before writing new request code — the API has gotchas that aren't obvious from the response format.
 - [ ] No P21 hostnames, internal IPs, or response bodies surface in user-facing errors.
 - [ ] If you touched `nullifySentinelDates`/sentinel handling, re-run `p21-fields.test.ts`; if you touched `aggregate` `order`/`having`, deploy `proxy-server.mjs` and re-verify against the live proxy (the app schema change alone is inert without the proxy).
 - [ ] If you changed the proxy rate limit (`RATE_CAPACITY` / `RATE_REFILL_PER_SEC`), it only takes effect after a **droplet deploy + service restart**; afterward confirm `/proxy/*` 429s aren't recurring under real load (`journalctl -u olander-proxy -g 'status.:429' --since '15 min ago'`).

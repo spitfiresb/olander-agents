@@ -10,7 +10,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ### Data API (referred to as P21, Prophet 21, Epicor, Olander API)
 
-- **API reference** (auth flow, tiers, endpoints, OData operators, real response shapes, gotchas): `P21_API.md` — read before writing any code that calls P21
+- **API reference** (auth flow, tiers, endpoints, OData operators, real response shapes, gotchas): `P21_API.md` (withheld from the public copy — see `SANITIZATION.md`)
 - **Reaching the API** (the hosting provider whitelist, RFC1918 DNS override, browser tunneling): `P21_Connection.md`
 - **Droplet operations** (Caddy/TLS, install.sh, firewall, systemd, rebuild runbook): `Droplet.md`
 

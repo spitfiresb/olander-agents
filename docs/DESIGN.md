@@ -313,16 +313,18 @@ When creating new UI components:
 
 ## Reference assets
 
-Lives in `brand/` at the project root.
-
-| File | What it is | Notes |
-|---|---|---|
-| `brand/client_landing_page.png` | full screenshot of olander.com home, 2026-05 | brand context only — not a layout reference for this product |
-| `brand/client_logo.svg` | full true lockup (white wordmark in red box), vector | **canonical logo for design work.** Olander never shows the wordmark without the red box, so always reach for this one. |
+The private repository carries a `brand/` directory holding the client's logo
+and a screenshot of their marketing site, used as design reference. Those are
+the client's trademarks and are **not published here** — see
+[`SANITIZATION.md`](SANITIZATION.md).
 
 ### Logo asset boundary
 
-`brand/client_logo.svg` is for **design reference only** — pasting into mockups, comparing layouts, etc. The in-app logo is `src/components/Logo.tsx` (inline SVG, color tracks `--color-brand-red`). Don't import the reference SVG into the product; if `Logo.tsx` ever drifts visually, re-trace from the reference, don't link to it.
+The reference lockup was for **design reference only** — pasting into mockups,
+comparing layouts, etc. The in-app logo is `src/components/Logo.tsx` (inline
+SVG, color tracks `--color-brand-red`). The reference SVG was never imported
+into the product; if `Logo.tsx` drifted visually, it was re-traced from the
+reference rather than linked to it.
 
 ---
 
@@ -335,8 +337,7 @@ Lives in `brand/` at the project root.
 | Brand tokens (CSS) | `src/app/globals.css` |
 | In-app logo (inline SVG) | `src/components/Logo.tsx` |
 | Wordmark composition | `src/components/Wordmark.tsx` |
-| Reference logo (do not import) | `brand/client_logo.svg` |
-| Live brand reference | https://www.olander.com |
+| Reference logo (do not import) | withheld — see `SANITIZATION.md` |
 
 ---
 

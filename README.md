@@ -6,6 +6,13 @@ assistant answers by querying Prophet 21 through a typed, read-only proxy.
 
 See `docs/VISION.md` for the product framing and `docs/DESIGN.md` for the visual system.
 
+> **Public extract.** This is a sanitized copy of a private client project.
+> The architecture, application code, and tests are intact; the client's
+> commercial rules, trademarks, and infrastructure details are not published.
+> The production system prompt has been replaced with a generic stand-in.
+> See [`docs/SANITIZATION.md`](docs/SANITIZATION.md) for exactly what was
+> withheld and why.
+
 
 ## What this is, in 30 seconds
 
@@ -89,13 +96,14 @@ See `docs/Runbook.md` for who-to-call when something is broken.
 
 ## Documentation index
 
-All documentation lives in [`docs/`](docs/).
+All documentation lives in [`docs/`](docs/). See
+[`docs/SANITIZATION.md`](docs/SANITIZATION.md) for what was withheld from this
+public copy and why.
 
 **Product & process**
 - `docs/VISION.md` — product framing
 - `docs/DESIGN.md` — design system
 - `docs/TESTING.md` — regression checklist
-- `docs/OLANDER_REQUESTS.md` — client request tracker
 - `docs/CLAUDE.md` — working rules for AI coding agents
 
 **Operations**
@@ -103,12 +111,9 @@ All documentation lives in [`docs/`](docs/).
 - `docs/Droplet.md` — droplet operations
 - `docs/db.md` — Neon + Drizzle
 - `docs/Limitations.md` — known limits
-- `docs/Assignments.md` — ownership
 
 **P21 integration**
-- `docs/P21_API.md` — upstream API reference
 - `docs/P21_Connection.md` — network plumbing
-- `docs/P21_Schema.md` — view and column reference
 
 **Retrieval**
 - `docs/RETRIEVAL.md` — retrieval design and cost analysis

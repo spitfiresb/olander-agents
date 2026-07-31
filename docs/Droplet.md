@@ -2,7 +2,7 @@
 
 How the DigitalOcean droplet at `<proxy-ip>` is configured, deployed, and operated. This is the box that whitelisted egress for P21 lives on; it also fronts our `/health` endpoint behind Caddy + Let's Encrypt and will eventually host the P21 proxy.
 
-> **Scope:** this doc is about the *box* — Caddy, TLS, install.sh, firewall, rebuild runbook, systemd cheat-sheet. For *what makes P21 specifically reachable* (the hosting provider whitelist, RFC1918 DNS override, SOCKS5 tunneling), see [`P21_Connection.md`](./P21_Connection.md). For the API surface and tool-calling integration, see [`P21_API.md`](./P21_API.md).
+> **Scope:** this doc is about the *box* — Caddy, TLS, install.sh, firewall, rebuild runbook, systemd cheat-sheet. For *what makes P21 specifically reachable* (the hosting provider whitelist, RFC1918 DNS override, SOCKS5 tunneling), see [`P21_Connection.md`](./P21_Connection.md).
 
 ## Architecture
 
