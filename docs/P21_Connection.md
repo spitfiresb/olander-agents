@@ -2,7 +2,7 @@
 
 How to reach Olander's P21 (Epicor Prophet 21) REST API. Access is read-only against the dev/play environment.
 
-> **Scope:** this doc covers the *upstream-specific* connectivity — what makes P21 reachable at all. For the operational details of the egress droplet (Caddy, install.sh, firewall, rebuild runbook), see [`Droplet.md`](./Droplet.md). For where we are on the broader integration (proxy, chatbot tool-calling), see [`P21_Integration.md`](./P21_Integration.md).
+> **Scope:** this doc covers the *upstream-specific* connectivity — what makes P21 reachable at all. For the operational details of the egress droplet (Caddy, install.sh, firewall, rebuild runbook), see [`Droplet.md`](./Droplet.md). For the API surface and tool-calling integration, see [`P21_API.md`](./P21_API.md).
 
 Two pieces are required end-to-end:
 
@@ -65,7 +65,7 @@ Tear down when done: `pkill -f "ssh.*-D 127.0.0.1:1080"`.
 
 ## Manually exploring the API from the droplet
 
-While we wait on auth credentials and endpoint docs from the provider contact (see [`P21_Integration.md`](./P21_Integration.md)), the droplet itself is the simplest way to poke at P21 endpoints — it inherits both the SNAT egress and the `/etc/hosts` override automatically:
+The droplet itself is the simplest way to poke at P21 endpoints — it inherits both the SNAT egress and the `/etc/hosts` override automatically:
 
 ```
 ssh -i ~/.ssh/olander_p21 root@<proxy-ip>
