@@ -4,7 +4,7 @@ Internal AI assistant for Olander's inside-sales team. Reps ask plain-English
 questions about parts, customers, inventory, orders, and purchasing; the
 assistant answers by querying Prophet 21 through a typed, read-only proxy.
 
-See `VISION.md` for the product framing and `DESIGN.md` for the visual system.
+See `docs/VISION.md` for the product framing and `docs/DESIGN.md` for the visual system.
 
 
 ## What this is, in 30 seconds
@@ -89,13 +89,32 @@ See `docs/Runbook.md` for who-to-call when something is broken.
 
 ## Documentation index
 
-- `VISION.md` — product framing
-- `DESIGN.md` — design system
-- `TESTING.md` — regression checklist
-- `TODO.md` — production handoff scope
+All documentation lives in [`docs/`](docs/).
+
+**Product & process**
+- `docs/VISION.md` — product framing
+- `docs/DESIGN.md` — design system
+- `docs/TESTING.md` — regression checklist
+- `docs/OLANDER_REQUESTS.md` — client request tracker
+- `docs/CLAUDE.md` — working rules for AI coding agents
+
+**Operations**
 - `docs/Runbook.md` — deploy / rollback / on-call
-- `docs/P21_API.md` — upstream API reference
-- `docs/P21_Connection.md` — network plumbing
 - `docs/Droplet.md` — droplet operations
 - `docs/db.md` — Neon + Drizzle
-- `docs/plans/Chat_LLM.md` — archived plan (older than the codebase)
+- `docs/Limitations.md` — known limits
+- `docs/Assignments.md` — ownership
+
+**P21 integration**
+- `docs/P21_API.md` — upstream API reference
+- `docs/P21_Connection.md` — network plumbing
+- `docs/P21_Schema.md` — view and column reference
+
+**Retrieval**
+- `docs/RETRIEVAL.md` — retrieval design and cost analysis
+- `docs/Vector_Store.md` — Qdrant wire contract
+- `docs/Retrieval_Runbook.md` — backfill, sync, recovery
+
+**Architecture & history**
+- `docs/System.md` — system diagram
+- `docs/plans/` — archived planning snapshots (older than the codebase)

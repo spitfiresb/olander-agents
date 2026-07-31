@@ -41,7 +41,7 @@ export const maxDuration = 300;
 // spoofing vector the moment a mutating tool lands). The discriminated union
 // is the deliberately narrow relaxation needed for Stage 2 attachments;
 // dropping back to `z.unknown()` would recreate the CVE-class regression
-// fixed in 760db8a / TESTING.md §2.
+// fixed in 760db8a / docs/TESTING.md §2.
 //
 // Assistant parts stay permissive because the client replays tool-call /
 // tool-result history from prior turns; the only real fix for that is
@@ -438,7 +438,7 @@ export async function POST(req: Request) {
     // 10 steps = enough headroom for: describeView → multi-step viewsQuery
     // chain (e.g. resolve location IDs, then transfers between them) → one or
     // two retries on filter syntax → final synthesis. Originally 8 (per
-    // TESTING.md), tightened to 4 at some point — but with describeView in
+    // docs/TESTING.md), tightened to 4 at some point — but with describeView in
     // the loop the model legitimately needs more steps before answering.
     stopWhen: stepCountIs(10),
     // Safety net against a blank reply: on the final allowed step, force the

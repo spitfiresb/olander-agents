@@ -1,6 +1,6 @@
 # Vector Store — Reference
 
-Catalog vectors live in a Qdrant Cloud collection. Row metadata + dedupe hash live in Neon (`catalog_item`). This doc covers the wire contract; design rationale is in [`../RETRIEVAL.md`](../RETRIEVAL.md), ops in [`Retrieval_Runbook.md`](./Retrieval_Runbook.md).
+Catalog vectors live in a Qdrant Cloud collection. Row metadata + dedupe hash live in Neon (`catalog_item`). This doc covers the wire contract; design rationale is in [`./RETRIEVAL.md`](./RETRIEVAL.md), ops in [`Retrieval_Runbook.md`](./Retrieval_Runbook.md).
 
 **Why it's separate from Neon.** Vector storage and user/chat-table storage have different growth curves. Splitting the vector store out keeps Neon's storage pressure on user-shaped data — auth, sessions, chat history, future docs — instead of a runaway catalog (or doc-chunk) index eating the same disk.
 

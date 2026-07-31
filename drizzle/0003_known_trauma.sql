@@ -1,5 +1,5 @@
 -- Move the catalog vector index from pgvector-on-Neon to Pinecone serverless.
--- See RETRIEVAL.md § Vector store for the history. The HNSW index lives on
+-- See docs/RETRIEVAL.md § Vector store for the history. The HNSW index lives on
 -- the embedding column, so it must be dropped first.
 --
 -- Apply only after scripts/migrate-neon-to-pinecone.ts has finished copying

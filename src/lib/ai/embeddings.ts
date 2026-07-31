@@ -1,6 +1,6 @@
 // Voyage AI embeddings wrapper.
 //
-// Asymmetric retrieval per RETRIEVAL.md:
+// Asymmetric retrieval per docs/RETRIEVAL.md:
 //   - embedDocuments → voyage-4-large, input_type="document". Used by the
 //     backfill and sync scripts. The cost compounds across every future query,
 //     so spend on quality once.
@@ -165,7 +165,7 @@ export function toVectorLiteral(vec: number[]): string {
   return `[${vec.join(",")}]`;
 }
 
-/** Build the stable embed-input text for a catalog row. See RETRIEVAL.md
+/** Build the stable embed-input text for a catalog row. See docs/RETRIEVAL.md
  * § What we embed for the rationale. */
 export function buildEmbedInput(row: {
   item_id: string;
@@ -181,7 +181,7 @@ export function buildEmbedInput(row: {
   // Skip extended_desc when it's empty, a bare RoHS marker, or a pure
   // numeric tolerance — those add zero signal and dilute the vector. Live
   // sampling (2026-05-12) showed ~25% of populated rows fall into one of
-  // those buckets. See RETRIEVAL.md § What we embed.
+  // those buckets. See docs/RETRIEVAL.md § What we embed.
   const ext = (row.extended_desc ?? "").trim();
   const extRedundant = ext === desc;
   const extIsJunk =

@@ -182,7 +182,7 @@ export function DocumentIcon({ className }: { className?: string } = {}) {
 }
 
 // Document with a small "PDF" marker — lets the chip read at a glance which
-// file kind it is without color (DESIGN.md "no second hue" rule).
+// file kind it is without color (docs/DESIGN.md "no second hue" rule).
 export function PdfIcon({ className }: { className?: string } = {}) {
   return (
     <svg

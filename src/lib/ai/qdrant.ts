@@ -42,7 +42,7 @@ export function getQdrantClient(): QdrantClient {
 }
 
 /** inv_mast_uid is a uint already, which Qdrant accepts directly as a
- * point id. Stable across P21 item_id changes — see RETRIEVAL.md § Schema. */
+ * point id. Stable across P21 item_id changes — see docs/RETRIEVAL.md § Schema. */
 export function vectorIdFor(invMastUid: number): number {
   return invMastUid;
 }

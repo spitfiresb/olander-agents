@@ -51,7 +51,7 @@ const ACCURACY_PROBES = [
 // item_desc. These are a subset of SUGGESTION_POOL, asserted harder here. Exact
 // SKUs ("31C100SHCS") and spec questions ("helicoil size") are deliberately NOT
 // listed — they legitimately skip searchCatalog. See src/lib/ai/tools.ts
-// (descriptiveNoMatchHint) and TESTING.md § P21 (descriptive-query routing).
+// (descriptiveNoMatchHint) and docs/TESTING.md § P21 (descriptive-query routing).
 const MUST_USE_SEARCH_CATALOG = new Set<string>([
   "Do we have any M10 1.25 socket head cap screws in stock?",
   "Find a 5/16-18 stainless flange nut",

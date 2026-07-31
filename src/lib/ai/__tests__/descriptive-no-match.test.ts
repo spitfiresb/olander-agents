@@ -6,7 +6,7 @@ import { descriptiveNoMatchHint } from "@/lib/ai/tools";
 // against p21_view_inv_mast — a literal text match that misses P21's
 // abbreviated descriptions ('LOCKNUT', 'SST') for a part we stock 6,731 of.
 // The hint fires on the symptom (a whiffed item_desc text filter) and steers
-// the model to searchCatalog. See TESTING.md § P21 (descriptive-query routing).
+// the model to searchCatalog. See docs/TESTING.md § P21 (descriptive-query routing).
 describe("descriptiveNoMatchHint", () => {
   const lockNutFilter =
     "substringof('LOCK NUT', item_desc) and substringof('1/4-20', item_desc) " +

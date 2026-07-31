@@ -16,7 +16,7 @@ import {
 
 // Daily catalog sync. Wired in vercel.json to fire at 10:00 UTC
 // (02:00 PST / 03:00 PDT — pre-dawn for Olander reps so a fresh index
-// is ready by 7am). See RETRIEVAL.md § Incremental sync.
+// is ready by 7am). See docs/RETRIEVAL.md § Incremental sync.
 //
 // Vercel sends `Authorization: Bearer ${CRON_SECRET}` on every cron-triggered
 // request (when CRON_SECRET is set in project env). We gate on that token so

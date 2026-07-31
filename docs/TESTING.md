@@ -143,7 +143,7 @@ The agent must FAIL LOUD, not quiet: when it can't compute exactly, it says so. 
 
 ## 4. P21 / data path
 
-**Surface:** `src/lib/ai/tools.ts` (`inventorySearch`), droplet `scripts/droplet/proxy-server.mjs`, `docs/P21_API.md`, `docs/P21_Connection.md`.
+**Surface:** `src/lib/ai/tools.ts` (`inventorySearch`), droplet `scripts/droplet/proxy-server.mjs`, `P21_API.md`, `P21_Connection.md`.
 
 **Why:** Lower change frequency but high blast radius — if P21 calls break, the product can't answer real questions. Network path is fragile (the hosting provider whitelist, RFC1918 DNS override on the droplet).
 
@@ -157,14 +157,14 @@ The agent must FAIL LOUD, not quiet: when it can't compute exactly, it says so. 
 - **the hosting provider IP allowlist** — the dev egress IP is `<proxy-ip>` (DO Reserved IP on droplet-1 / SFO2). If P21 starts rejecting, confirm the droplet is still routing via that IP.
 - **RFC1918 DNS override** — P21's public DNS resolves to a private IP. The droplet's `/etc/hosts` overrides this with `<p21-host-ip>`. If you rebuild the droplet, the override has to be re-applied (see `install.sh`).
 - **Proxy credentials** — `proxy-server.mjs` reads creds from env. Missing creds surface as `proxy_up.creds_present: false` in `/api/status`.
-- **Proxy rate limit is sized for BURSTS, on a shared IP** — the droplet token bucket (`RATE_CAPACITY` / `RATE_REFILL_PER_SEC` in `proxy-server.mjs`) keys on the source IP, but all app traffic arrives from a few **shared Vercel egress IPs**, so it behaves as a near-global cap. The original `30` capacity / `0.5`-per-sec drained on a single **parallel-tool-call burst** (gpt-4.1-mini issues tool calls in parallel) and `429`'d live reps — observed in prod `2026-06-08` and `2026-06-10`, surfacing to users as "Something went wrong." Now `600` / `10`-per-sec. If you re-tune, size the **burst** (capacity) *and* the recovery (refill), not a per-minute average. This limiter only meters app→droplet request rate; droplet→P21 fold load is bounded separately (`AGG_CONCURRENCY`), so raising it doesn't uncap the shared ERP. **Proper fix:** per-user keying — see `docs/plans/Proxy_Per_User_Rate_Limit.md`.
+- **Proxy rate limit is sized for BURSTS, on a shared IP** — the droplet token bucket (`RATE_CAPACITY` / `RATE_REFILL_PER_SEC` in `proxy-server.mjs`) keys on the source IP, but all app traffic arrives from a few **shared Vercel egress IPs**, so it behaves as a near-global cap. The original `30` capacity / `0.5`-per-sec drained on a single **parallel-tool-call burst** (gpt-4.1-mini issues tool calls in parallel) and `429`'d live reps — observed in prod `2026-06-08` and `2026-06-10`, surfacing to users as "Something went wrong." Now `600` / `10`-per-sec. If you re-tune, size the **burst** (capacity) *and* the recovery (refill), not a per-minute average. This limiter only meters app→droplet request rate; droplet→P21 fold load is bounded separately (`AGG_CONCURRENCY`), so raising it doesn't uncap the shared ERP. **Proper fix:** per-user keying — see `plans/Proxy_Per_User_Rate_Limit.md`.
 - **Grain / sentinel / dead-stock class** (the confidently-wrong-*data* class — distinct from the wrong-*number* class in §2). A "top 10 dead stock at 0 stock" list once included a part with 436 units on hand. Three independent data traps, each guarded now:
   - **Grain** — `p21_view_inv_loc` is one row per item × *location* (Olander runs ~3 warehouses); `oe_line`/`invoice_line` are per *line*; lot/bin/serial views per lot/bin/serial. **~81% of inv_loc rows read `qty_on_hand=0` only because the item isn't carried at that location.** Filtering `qty_on_hand eq 0` and listing the rows surfaces phantoms (items fully stocked elsewhere). Company-wide stock must roll up across locations. System prompt has the GRAIN + STOCK AVAILABILITY guardrails; if the model lists raw zero-rows as "out of stock," it regressed.
   - **Sentinel dates** — P21 stores "never sold" as `last_sale_date = 1990-01-01` (186k of 260k inv_loc rows), not null. `nullifySentinelDates`/`nullifySentinelDatesLoose` in `p21-fields.ts` null these (DateTime cols / date-named fields) so the model reads "never," not a fabricated ~36-year age. Unit-tested in `p21-fields.test.ts`. **App-layer only — takes effect with no droplet deploy.** Watch: a "hasn't sold in 36 years" answer means the nullify pass was bypassed.
   - **Find-the-zeros / full-fold timeout** — `aggregate` now takes `order:'asc'` + `having:{op,value}` (returns `groups_matching`) for bottom/zero questions; **a full `inv_loc` fold times out at ~23%**, so the model must filter first (e.g. `qty_on_hand gt 0` → exact in ~12s). The dead-stock recipes live in the system prompt's "DEAD / SLOW-MOVING STOCK" guardrail. **`order`/`having` require a droplet deploy of `proxy-server.mjs`** — until deployed they're ignored upstream (groups still rank desc, no having filter), so verify against the live proxy after restart.
 
 ### When you change P21-touching code
-- [ ] Re-read `docs/P21_API.md` (auth flow, OData operators, real response shapes) before writing new request code — the API has gotchas that aren't obvious from the response format.
+- [ ] Re-read `P21_API.md` (auth flow, OData operators, real response shapes) before writing new request code — the API has gotchas that aren't obvious from the response format.
 - [ ] No P21 hostnames, internal IPs, or response bodies surface in user-facing errors.
 - [ ] If you touched `nullifySentinelDates`/sentinel handling, re-run `p21-fields.test.ts`; if you touched `aggregate` `order`/`having`, deploy `proxy-server.mjs` and re-verify against the live proxy (the app schema change alone is inert without the proxy).
 - [ ] If you changed the proxy rate limit (`RATE_CAPACITY` / `RATE_REFILL_PER_SEC`), it only takes effect after a **droplet deploy + service restart**; afterward confirm `/proxy/*` 429s aren't recurring under real load (`journalctl -u olander-proxy -g 'status.:429' --since '15 min ago'`).
@@ -184,14 +184,14 @@ The agent must FAIL LOUD, not quiet: when it can't compute exactly, it says so. 
 - [ ] After the `0002` migration: `SELECT email, role FROM member` shows the seeded bootstrap admins (+ a row per pre-existing `user`). Some migration steps in `0002` are hand-written SQL appended after the generated `CREATE TABLE` — re-generating won't reproduce them, so don't regenerate `0002`.
 
 ### Things to watch for
-- **One Neon project only** (`<neon-project-id>`, Vercel-managed, `aws-us-west-2`) — do *not* create a second project. See `docs/db.md`.
+- **One Neon project only** (`<neon-project-id>`, Vercel-managed, `aws-us-west-2`) — do *not* create a second project. See `db.md`.
 - **Schema drift** — if you edit `src/db/schema.ts` without running `db:generate`, the deployed DB diverges silently. Always generate + commit the migration.
 
 ---
 
 ## 6. Retrieval / catalog-vector index
 
-**Surface:** `src/lib/ai/tools.ts` (`searchCatalog`), `src/lib/ai/embeddings.ts`, `src/lib/ai/qdrant.ts`, `src/db/schema.ts` (`catalog_item`), `drizzle/0002_*` + `drizzle/0003_*` + `drizzle/0004_*`, `scripts/backfill-catalog.ts`, `scripts/sync-catalog.ts`, `scripts/create-qdrant-collection.ts`, `src/app/api/cron/sync-catalog/route.ts`, `vercel.json` cron entry. See [`RETRIEVAL.md`](RETRIEVAL.md) for design and [`docs/Retrieval_Runbook.md`](docs/Retrieval_Runbook.md) for ops.
+**Surface:** `src/lib/ai/tools.ts` (`searchCatalog`), `src/lib/ai/embeddings.ts`, `src/lib/ai/qdrant.ts`, `src/db/schema.ts` (`catalog_item`), `drizzle/0002_*` + `drizzle/0003_*` + `drizzle/0004_*`, `scripts/backfill-catalog.ts`, `scripts/sync-catalog.ts`, `scripts/create-qdrant-collection.ts`, `src/app/api/cron/sync-catalog/route.ts`, `vercel.json` cron entry. See [`RETRIEVAL.md`](RETRIEVAL.md) for design and [`Retrieval_Runbook.md`](Retrieval_Runbook.md) for ops.
 
 **Why low (for now):** brand-new surface. The lock-step write order (Qdrant first, Neon hash second) is load-bearing and the most likely place a regression would surface.
 

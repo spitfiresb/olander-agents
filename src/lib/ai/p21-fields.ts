@@ -123,7 +123,7 @@ export function coerceRowsBySchema(viewName: string, rows: Row[]): Row[] {
 // as "never" — the thing it actually means. Matched on the date part at exact
 // midnight (every sentinel is 00:00:00); a real event would carry a wall-clock
 // time, and Olander's P21 has no genuine 1900/1990 history. See
-// docs/P21_API.md §Sentinels and TESTING.md § "Sentinel dates".
+// docs/P21_API.md §Sentinels and docs/TESTING.md § "Sentinel dates".
 const SENTINEL_DATE_PARTS = new Set([
   "1753-01-01", // SQL Server datetime min
   "1900-01-01", // common P21 / SQL default

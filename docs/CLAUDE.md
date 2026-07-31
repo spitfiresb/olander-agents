@@ -10,14 +10,14 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ### Data API (referred to as P21, Prophet 21, Epicor, Olander API)
 
-- **API reference** (auth flow, tiers, endpoints, OData operators, real response shapes, gotchas): `docs/P21_API.md` — read before writing any code that calls P21
-- **Reaching the API** (the hosting provider whitelist, RFC1918 DNS override, browser tunneling): `docs/P21_Connection.md`
-- **Droplet operations** (Caddy/TLS, install.sh, firewall, systemd, rebuild runbook): `docs/Droplet.md`
+- **API reference** (auth flow, tiers, endpoints, OData operators, real response shapes, gotchas): `P21_API.md` — read before writing any code that calls P21
+- **Reaching the API** (the hosting provider whitelist, RFC1918 DNS override, browser tunneling): `P21_Connection.md`
+- **Droplet operations** (Caddy/TLS, install.sh, firewall, systemd, rebuild runbook): `Droplet.md`
 
 ### Database (Neon Postgres + Drizzle + Auth.js adapter)
 
-- **Connection topology, schema, migration workflow**: `docs/db.md`. Read before touching `src/db/`, `drizzle/`, or anything that talks to Postgres. Especially: there is exactly **one** Neon project (`<neon-project-id>`, Vercel-managed, `aws-us-west-2`) — do not create a second one.
-- **Tables**: `src/db/schema.ts` carries the Auth.js adapter tables (`user`, `account`, `session`, `verificationToken`), the sign-in allowlist (`member` — who may sign in + their tier `admin`/`user`/`revoked` + per-member `dataScopes` override; reads/writes via `src/lib/members.ts`, managed at `/admin/members`), chat persistence (`conversation`, `message`, `toolCall`), the failed-turn diagnostic log (`chat_error` — one row per chat turn that errored or came back blank, written fail-safe by `src/lib/chat-errors.ts` and shown read-only at `/admin/errors`; see `docs/Runbook.md` § diagnosing chat errors), and the catalog row metadata (`catalog_item` — text + dedupe hash, no vector column; the vectors live in Qdrant — see Vector store below). All chat-table reads/writes go through `src/lib/conversations.ts`, which enforces per-user ownership — never query the chat tables with an externally supplied id directly.
+- **Connection topology, schema, migration workflow**: `db.md`. Read before touching `src/db/`, `drizzle/`, or anything that talks to Postgres. Especially: there is exactly **one** Neon project (`<neon-project-id>`, Vercel-managed, `aws-us-west-2`) — do not create a second one.
+- **Tables**: `src/db/schema.ts` carries the Auth.js adapter tables (`user`, `account`, `session`, `verificationToken`), the sign-in allowlist (`member` — who may sign in + their tier `admin`/`user`/`revoked` + per-member `dataScopes` override; reads/writes via `src/lib/members.ts`, managed at `/admin/members`), chat persistence (`conversation`, `message`, `toolCall`), the failed-turn diagnostic log (`chat_error` — one row per chat turn that errored or came back blank, written fail-safe by `src/lib/chat-errors.ts` and shown read-only at `/admin/errors`; see `Runbook.md` § diagnosing chat errors), and the catalog row metadata (`catalog_item` — text + dedupe hash, no vector column; the vectors live in Qdrant — see Vector store below). All chat-table reads/writes go through `src/lib/conversations.ts`, which enforces per-user ownership — never query the chat tables with an externally supplied id directly.
 
 ### Data-access scopes
 - **What:** every P21 view and entity route is categorized into a named scope. The scope catalog (keys, labels, view assignments, entity assignments) is **data**, not code — it lives in the `scope`, `scope_view`, and `scope_entity` tables and is edited from `/admin/scopes` (a drag-and-drop kanban board). The 10-bucket base layout (`items`, `stock`, `customers`, `sales`, `invoices`, `pricing`, `traceability`, `inbound`, `outbound`, `purchasing`) ships in `src/lib/scope-defaults.ts` and is seeded by `drizzle/0008_*.sql`; the same defaults power the admin UI's "Reset to defaults". Each member has an optional `dataScopes` override (null = tier default). Admins bypass entirely; the default for non-admins is everything operational — `pricing` (margin-bearing job pricing) is the only opt-in bucket. Beyond the view-level gate, **cost/margin columns** (`*_cost`, `gross_margin`, `profit_percent`, COGS, commission cost, markups) are **redacted at the column level** for anyone without the `pricing` scope: they ride along on default-on views like `p21_view_inv_loc` / `p21_view_oe_hdr` / `p21_view_oe_line`, so view-level gating alone would leak them. The redaction (plus a schema-driven numeric re-coercion pass) lives in `src/lib/ai/p21-fields.ts` and is applied in `tools.ts` after the proxy returns. Selling-price tiers (`price1..price10`) are deliberately **not** redacted — reps need them to quote, and they appear on customer-facing invoices anyway. Uncategorized views are denied for non-admins by design.
@@ -26,9 +26,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ### Vector store (Qdrant Cloud, AWS us-west-1)
 
-- **Reference** (point shape, operations, payload schema, filter syntax, gotchas): `docs/Vector_Store.md` — read before writing any code that talks to Qdrant or touches `src/lib/ai/qdrant.ts`.
+- **Reference** (point shape, operations, payload schema, filter syntax, gotchas): `Vector_Store.md` — read before writing any code that talks to Qdrant or touches `src/lib/ai/qdrant.ts`.
 - **Why it lives outside Neon**: vector storage and user/chat-table storage have different growth curves; splitting them keeps Neon's scaling pressure on user-shaped data instead of a runaway catalog (or future doc-chunk) index eating the same disk.
-- **Operations** (backfill, sync, smoke test, runbook): `docs/Retrieval_Runbook.md`.
+- **Operations** (backfill, sync, smoke test, runbook): `Retrieval_Runbook.md`.
 
 ### Tests
 Run with `npm test`. Unit tests live in `src/**/__tests__/`. Keep test targets pure — `src/lib/auth-allowlist.ts` exists because `src/auth.ts` pulls in `next-auth`, which Vitest can't load without an environment shim.

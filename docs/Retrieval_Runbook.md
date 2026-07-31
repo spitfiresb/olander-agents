@@ -1,6 +1,6 @@
 # Retrieval — Operational Runbook
 
-How to run, monitor, and recover the catalog-vector index. Pairs with [`../RETRIEVAL.md`](../RETRIEVAL.md), which is the design doc; this is the operations doc.
+How to run, monitor, and recover the catalog-vector index. Pairs with [`./RETRIEVAL.md`](./RETRIEVAL.md), which is the design doc; this is the operations doc.
 
 ## Components at a glance
 

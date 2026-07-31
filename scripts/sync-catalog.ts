@@ -19,7 +19,7 @@
 //         inv_mast_uid from the proxy, diff against catalog_item, and mark
 //         the missing ones deleted.
 //
-// See RETRIEVAL.md § Incremental sync. The HTTP equivalent of this script
+// See docs/RETRIEVAL.md § Incremental sync. The HTTP equivalent of this script
 // lives at /api/cron/sync-catalog and is what production hits — keep them in
 // step when changing logic.
 

@@ -159,7 +159,7 @@ function denyForEntity(
 // call, and burns the whole step budget without ever answering. Attaching a
 // concrete hint + an explicit "don't retry unchanged" lets the model
 // self-correct (and pairs with the route's final-step synthesis safety net).
-// See TESTING.md § P21 for the date-literal gotcha this most often catches.
+// See docs/TESTING.md § P21 for the date-literal gotcha this most often catches.
 function annotateViewError(result: unknown): unknown {
   if (!result || typeof result !== "object" || !("error" in result)) return result;
   const blob = JSON.stringify(result);
@@ -183,7 +183,7 @@ function annotateViewError(result: unknown): unknown {
 // SYMPTOM (a descriptive filter that whiffed) regardless of the specific part,
 // so it catches the whole class the system prompt's steering can miss — it steers
 // the model to searchCatalog (semantic, spelling-immune) instead of letting an
-// empty page become a confident "we don't carry it". See TESTING.md § P21
+// empty page become a confident "we don't carry it". See docs/TESTING.md § P21
 // (descriptive-query routing) and the "Finding parts by description" prompt block.
 const DESC_TEXT_FILTER_RE = /substringof\s*\([^)]*\bitem_desc\b/i;
 

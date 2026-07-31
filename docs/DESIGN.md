@@ -6,7 +6,7 @@
 
 Internal AI assistant for the Olander team. Tonally + visually aligned with the parent brand (olander.com) without copying its layout — this is a chat product, not a marketing site.
 
-> **Source of truth for tokens / chat-specific decisions:** `docs/plans/Chat_LLM.md` (§ Brand tokens, § Chat-message styling). This file is the *why* and the *brand context*; that file is the *what to ship*.
+> **Source of truth for tokens / chat-specific decisions:** `plans/Chat_LLM.md` (§ Brand tokens, § Chat-message styling). This file is the *why* and the *brand context*; that file is the *what to ship*.
 
 ---
 
@@ -330,8 +330,8 @@ Lives in `brand/` at the project root.
 
 | Purpose | Location |
 |---------|----------|
-| Brand tokens (canonical) | `docs/plans/Chat_LLM.md` § Brand tokens |
-| Chat-specific styling decisions | `docs/plans/Chat_LLM.md` § Chat-message styling |
+| Brand tokens (canonical) | `plans/Chat_LLM.md` § Brand tokens |
+| Chat-specific styling decisions | `plans/Chat_LLM.md` § Chat-message styling |
 | Brand tokens (CSS) | `src/app/globals.css` |
 | In-app logo (inline SVG) | `src/components/Logo.tsx` |
 | Wordmark composition | `src/components/Wordmark.tsx` |

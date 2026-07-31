@@ -9,7 +9,7 @@
 // skips rows whose content hasn't changed. Re-runs are cheap to invoke; the
 // 50M-token cap is a runaway-loop circuit breaker, not a cost ceiling.
 //
-// See RETRIEVAL.md § Backfill script for the design.
+// See docs/RETRIEVAL.md § Backfill script for the design.
 
 // Dynamic imports below: ESM hoists static `import { db }` above the top-level
 // dotenv `config()` call, so the Drizzle client binds to the placeholder
@@ -32,7 +32,7 @@ const EMBED_BATCH = 100;
 // already dominates the page time, so the sleep is mostly absorbed.
 const PAGE_DELAY_MS = Number(process.env.PAGE_DELAY_MS ?? 2500);
 
-// Real catalog is ~3M tokens (per RETRIEVAL.md cost analysis, verified 2026-05-12).
+// Real catalog is ~3M tokens (per docs/RETRIEVAL.md cost analysis, verified 2026-05-12).
 // 50M is 15x headroom. At voyage-4-large's $0.12/MTok that would be $6 if we
 // ever left the free tier — a circuit breaker for a stuck loop, not a budget.
 const MAX_BACKFILL_TOKENS = 50_000_000;

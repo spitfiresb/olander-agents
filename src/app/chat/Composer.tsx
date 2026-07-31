@@ -30,7 +30,7 @@ export type ComposerAttachment = {
 // Mirror of src/lib/blob.ts ALLOWED_MIME — duplicated here so the file input
 // `accept` attribute filters at the OS picker level, and so the paste/drop
 // paths can pre-reject before the network call. Server is still the
-// authoritative validator (TESTING.md §2).
+// authoritative validator (docs/TESTING.md §2).
 const ACCEPT_MIME = [
   "image/png",
   "image/jpeg",

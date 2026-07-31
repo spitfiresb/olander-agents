@@ -107,7 +107,7 @@ If you ever do want the smoke test (e.g. before scaling to vendor-spec-sheet ing
 
 ### What we embed: a tight assembly of catalog text
 
-**Decision:** the embed input for each `inv_mast` row is a short text assembly. Two real examples from Olander's actual catalog (verified 2026-05-12 against play env, see `docs/P21_Samples.md`):
+**Decision:** the embed input for each `inv_mast` row is a short text assembly. Two real examples from Olander's actual catalog (verified 2026-05-12 against play env, see `P21_Samples.md`):
 
 ```
 SKU: 6C100SFIS

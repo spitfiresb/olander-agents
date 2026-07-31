@@ -8,7 +8,7 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 
-  /* Brand tokens — see DESIGN.md.
+  /* Brand tokens — see docs/DESIGN.md.
      Red is reserved for action affordances; do not introduce a new hue. */
   --color-brand-red: #eb402e;
   --color-brand-sand: #e4d9c5;
